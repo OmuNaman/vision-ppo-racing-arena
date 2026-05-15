@@ -33,13 +33,15 @@ MAP_VARIANTS: dict[str, dict[str, Any]] = {
 @dataclass(frozen=True)
 class RewardParts:
     progress: float
-    center_penalty: float
+    center_reward: float
+    road_reward: float
+    offroad_penalty: float
     crash_penalty: float
     finish_bonus: float
 
     @property
     def total(self) -> float:
-        return self.progress - self.center_penalty + self.crash_penalty + self.finish_bonus
+        return self.progress + self.center_reward + self.road_reward + self.offroad_penalty + self.crash_penalty + self.finish_bonus
 
 
 def _make_map_config(sequence: str) -> dict[str, Any]:
@@ -121,7 +123,7 @@ class RacingEnv(gym.Env):
         for _ in range(FRAME_STACK):
             self._frames.append(frame.copy())
         self._last_completion = self._route_completion(info)
-        return self._stacked_obs(), self._clean_info(info, RewardParts(0.0, 0.0, 0.0, 0.0))
+        return self._stacked_obs(), self._clean_info(info, RewardParts(0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
 
     def step(self, action):
         action = np.asarray(action, dtype=np.float32).clip(-1.0, 1.0)
@@ -129,6 +131,7 @@ class RacingEnv(gym.Env):
         self._frames.append(self._extract_frame(raw_obs))
 
         reward_parts = self._compute_reward(info)
+        terminated = bool(terminated or self._crashed(info) or not self._on_road(info))
         clean_info = self._clean_info(info, reward_parts)
         return self._stacked_obs(), float(reward_parts.total), bool(terminated), bool(truncated), clean_info
 
@@ -163,16 +166,29 @@ class RacingEnv(gym.Env):
         progress = max(0.0, completion - self._last_completion) * 100.0
         self._last_completion = max(self._last_completion, completion)
 
-        center_penalty = self._distance_from_center()
+        distance_from_center = self._distance_from_center()
+        on_road = self._on_road(info)
+        # Bounded shaping: +1.0 on the centerline, smoothly falling to -0.5
+        # near/off the lane edge. This avoids huge negative rewards from raw
+        # lateral distances while still making center driving obviously best.
+        center_score = 1.0 - min(distance_from_center / (ROAD_WIDTH * 0.5), 1.0)
+        moving_forward = progress > 1e-4
+        center_reward = (-0.5 + 1.5 * center_score) if moving_forward else -0.05
+        road_reward = 0.2 if on_road and moving_forward else 0.0
+        offroad_penalty = -1.0 if not on_road else 0.0
         crash_penalty = -10.0 if self._crashed(info) else 0.0
         finish_bonus = 20.0 if self._arrived(info) else 0.0
-        return RewardParts(progress, center_penalty, crash_penalty, finish_bonus)
+        return RewardParts(progress, center_reward, road_reward, offroad_penalty, crash_penalty, finish_bonus)
 
     def _clean_info(self, info: dict[str, Any], reward_parts: RewardParts) -> dict[str, Any]:
         clean = dict(info)
         clean["route_completion"] = self._route_completion(info)
-        clean["distance_from_center"] = reward_parts.center_penalty
+        clean["distance_from_center"] = self._distance_from_center()
+        clean["on_road"] = self._on_road(info)
         clean["reward_progress"] = reward_parts.progress
+        clean["reward_center"] = reward_parts.center_reward
+        clean["reward_road"] = reward_parts.road_reward
+        clean["reward_offroad"] = reward_parts.offroad_penalty
         clean["reward_crash"] = reward_parts.crash_penalty
         clean["reward_finish"] = reward_parts.finish_bonus
         clean["reward_total"] = reward_parts.total
@@ -187,11 +203,28 @@ class RacingEnv(gym.Env):
 
     @staticmethod
     def _crashed(info: dict[str, Any]) -> bool:
-        return any(bool(info.get(key, False)) for key in ("crash", "crash_vehicle", "crash_object", "crash_human"))
+        return any(
+            bool(info.get(key, False))
+            for key in ("crash", "crash_vehicle", "crash_object", "crash_human", "crash_sidewalk")
+        )
 
     @staticmethod
     def _arrived(info: dict[str, Any]) -> bool:
         return bool(info.get("arrive_dest", False) or info.get("success", False))
+
+    def _on_road(self, info: dict[str, Any]) -> bool:
+        if bool(info.get("out_of_road", False)):
+            return False
+        vehicle = getattr(self._env, "agent", None)
+        if vehicle is None and hasattr(self._env, "agents"):
+            vehicle = self._env.agents.get("agent0")
+        if vehicle is None:
+            return True
+        if bool(getattr(vehicle, "crash_sidewalk", False)):
+            return False
+        if hasattr(vehicle, "on_lane"):
+            return bool(vehicle.on_lane)
+        return True
 
     def _distance_from_center(self) -> float:
         vehicle = getattr(self._env, "agent", None)
