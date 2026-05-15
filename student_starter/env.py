@@ -35,13 +35,22 @@ class RewardParts:
     progress: float
     center_reward: float
     road_reward: float
+    speed_reward: float
     offroad_penalty: float
     crash_penalty: float
     finish_bonus: float
 
     @property
     def total(self) -> float:
-        return self.progress + self.center_reward + self.road_reward + self.offroad_penalty + self.crash_penalty + self.finish_bonus
+        return (
+            self.progress
+            + self.center_reward
+            + self.road_reward
+            + self.speed_reward
+            + self.offroad_penalty
+            + self.crash_penalty
+            + self.finish_bonus
+        )
 
 
 def _make_map_config(sequence: str) -> dict[str, Any]:
@@ -123,7 +132,7 @@ class RacingEnv(gym.Env):
         for _ in range(FRAME_STACK):
             self._frames.append(frame.copy())
         self._last_completion = self._route_completion(info)
-        return self._stacked_obs(), self._clean_info(info, RewardParts(0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
+        return self._stacked_obs(), self._clean_info(info, RewardParts(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
 
     def step(self, action):
         action = np.asarray(action, dtype=np.float32).clip(-1.0, 1.0)
@@ -175,10 +184,13 @@ class RacingEnv(gym.Env):
         moving_forward = progress > 1e-4
         center_reward = (-0.5 + 1.5 * center_score) if moving_forward else -0.05
         road_reward = 0.2 if on_road and moving_forward else 0.0
+        speed_km_h = self._speed_km_h()
+        speed_score = min(max(speed_km_h, 0.0) / 35.0, 1.0)
+        speed_reward = 0.6 * speed_score if on_road and moving_forward else 0.0
         offroad_penalty = -1.0 if not on_road else 0.0
         crash_penalty = -10.0 if self._crashed(info) else 0.0
         finish_bonus = 20.0 if self._arrived(info) else 0.0
-        return RewardParts(progress, center_reward, road_reward, offroad_penalty, crash_penalty, finish_bonus)
+        return RewardParts(progress, center_reward, road_reward, speed_reward, offroad_penalty, crash_penalty, finish_bonus)
 
     def _clean_info(self, info: dict[str, Any], reward_parts: RewardParts) -> dict[str, Any]:
         clean = dict(info)
@@ -188,6 +200,7 @@ class RacingEnv(gym.Env):
         clean["reward_progress"] = reward_parts.progress
         clean["reward_center"] = reward_parts.center_reward
         clean["reward_road"] = reward_parts.road_reward
+        clean["reward_speed"] = reward_parts.speed_reward
         clean["reward_offroad"] = reward_parts.offroad_penalty
         clean["reward_crash"] = reward_parts.crash_penalty
         clean["reward_finish"] = reward_parts.finish_bonus
@@ -225,6 +238,12 @@ class RacingEnv(gym.Env):
         if hasattr(vehicle, "on_lane"):
             return bool(vehicle.on_lane)
         return True
+
+    def _speed_km_h(self) -> float:
+        vehicle = getattr(self._env, "agent", None)
+        if vehicle is None and hasattr(self._env, "agents"):
+            vehicle = self._env.agents.get("agent0")
+        return float(max(getattr(vehicle, "speed_km_h", 0.0), 0.0)) if vehicle is not None else 0.0
 
     def _distance_from_center(self) -> float:
         vehicle = getattr(self._env, "agent", None)
