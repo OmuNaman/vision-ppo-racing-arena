@@ -40,10 +40,14 @@ Checkpoints are saved to `checkpoints/policy.pt` every 50k environment steps and
 The reward uses MetaDrive's forward-driving reward as the base, then adds sky-road shaping:
 
 - Forward progress and speed are rewarded.
+- Overspeeding above roughly 35 km/h gets a mild penalty.
 - Staying near the lane center gets a small bonus.
 - Positive throttle gets a small bonus.
 - Braking is penalized, especially at low speed or when already nearly idle.
+- Excessive steering is penalized, especially while fast or near the road edge.
+- Steering and positive throttle commands are scaled down internally so early PPO exploration is less twitchy.
 - Crawling/idling after the first few steps gets a recurring penalty.
+- Sustained low-speed stalling ends the episode with a penalty.
 - Reaching the finish gives `+100`.
 - Falling off the road gives `-60`.
 - Hitting an obstacle or traffic vehicle gives `-35`.

@@ -11,7 +11,7 @@ from torch.distributions import Normal
 
 
 class CNNActorCritic(nn.Module):
-    def __init__(self, action_dim: int = 2, init_log_std: float = -0.5) -> None:
+    def __init__(self, action_dim: int = 2, init_log_std: float = -1.0) -> None:
         super().__init__()
         self.action_dim = action_dim
         self.encoder = nn.Sequential(
@@ -29,6 +29,11 @@ class CNNActorCritic(nn.Module):
         self.actor = nn.Linear(512, action_dim)
         self.critic = nn.Linear(512, 1)
         self.log_std = nn.Parameter(torch.full((action_dim,), init_log_std))
+        nn.init.zeros_(self.actor.weight)
+        nn.init.zeros_(self.actor.bias)
+        if action_dim >= 2:
+            with torch.no_grad():
+                self.actor.bias[1] = 0.8
 
     def forward(self, obs: torch.Tensor) -> tuple[Normal, torch.Tensor]:
         features = self.encode(obs)

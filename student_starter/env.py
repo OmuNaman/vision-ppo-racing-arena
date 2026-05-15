@@ -17,6 +17,8 @@ import numpy as np
 
 FRAME_STACK = 4
 CAMERA_SIZE = 64
+STEERING_SCALE = 0.30
+THROTTLE_SCALE = 0.75
 
 
 EVAL_MAPS: dict[str, dict[str, Any]] = {
@@ -70,6 +72,7 @@ class RacingEnv(gym.Env):
         self._frames: deque[np.ndarray] = deque(maxlen=FRAME_STACK)
         self._last_info: dict[str, Any] = {}
         self._episode_step = 0
+        self._stall_steps = 0
 
         map_cfg = EVAL_MAPS.get(self._map_name, EVAL_MAPS["sky_chicane"])
         self._env = MetaDriveEnv(
@@ -144,6 +147,7 @@ class RacingEnv(gym.Env):
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
         raw_obs, info = self._env.reset(seed=self._base_seed if seed is None else seed)
         self._episode_step = 0
+        self._stall_steps = 0
         frame = self._rgb_frame(raw_obs)
         self._frames.clear()
         for _ in range(FRAME_STACK):
@@ -153,11 +157,30 @@ class RacingEnv(gym.Env):
 
     def step(self, action):
         clipped_action = np.asarray(action, dtype=np.float32).clip(-1.0, 1.0)
-        raw_obs, default_reward, terminated, truncated, info = self._env.step(clipped_action)
+        env_action = clipped_action.copy()
+        env_action[0] *= STEERING_SCALE
+        if env_action[1] > 0.0:
+            env_action[1] *= THROTTLE_SCALE
+        raw_obs, default_reward, terminated, truncated, info = self._env.step(env_action)
         self._episode_step += 1
         self._frames.append(self._rgb_frame(raw_obs))
         info = self._augment_info(info)
+        info["policy_steer"] = float(clipped_action[0])
+        info["applied_steer"] = float(env_action[0])
+        info["applied_throttle"] = float(env_action[1])
         reward = self._sky_reward(float(default_reward), info, clipped_action)
+        if self._is_stalling(info, clipped_action):
+            self._stall_steps += 1
+        else:
+            self._stall_steps = 0
+        info["stall_steps"] = self._stall_steps
+        if self._stall_steps >= 35:
+            reward = -120.0
+            info["sky_reward"] = reward
+            info["terminal_reason"] = "stalled_on_sky_road"
+            terminated = True
+        if info.get("terminal_reason") in {"fell_off_sky_road", "hit_edge"}:
+            terminated = True
         self._last_info = info
         return self._stacked_obs(), reward, bool(terminated), bool(truncated), info
 
@@ -220,19 +243,27 @@ class RacingEnv(gym.Env):
         reward = default_reward
         speed = float(info.get("speed_km_h", 0.0))
         center = float(info.get("center_score", 0.0))
+        steer = abs(float(action[0]))
         throttle = max(float(action[1]), 0.0)
         brake = max(float(-action[1]), 0.0)
 
-        reward += 0.08 * center
-        reward -= 0.10 * (1.0 - center)
+        off_center = 1.0 - center
+        reward += 0.12 * center
+        reward -= 0.45 * (off_center**2)
         reward += 0.04 * min(speed / 35.0, 1.0)
+        if speed > 35.0:
+            reward -= 0.03 * ((speed - 35.0) / 5.0)
         reward += 0.04 * throttle * (1.0 if speed < 35.0 else 0.25)
 
-        brake_penalty = 0.18 * brake
+        steering_penalty = 0.03 * steer + 0.10 * steer * min(speed / 25.0, 1.0) + 0.22 * steer * off_center
+        reward -= steering_penalty
+        info["steering_penalty"] = float(steering_penalty)
+
+        brake_penalty = 0.50 * brake
         if speed < 12.0:
-            brake_penalty += 0.35 * brake
+            brake_penalty += 2.00 * brake
         if self._episode_step > 20 and speed < 3.0:
-            brake_penalty += 0.35 * brake
+            brake_penalty += 2.00 * brake
         reward -= brake_penalty
         info["brake_amount"] = brake
         info["brake_penalty"] = float(brake_penalty)
@@ -261,6 +292,11 @@ class RacingEnv(gym.Env):
 
         info["sky_reward"] = float(reward)
         return float(reward)
+
+    def _is_stalling(self, info: dict[str, Any], action: np.ndarray) -> bool:
+        speed = float(info.get("speed_km_h", 0.0))
+        throttle = float(action[1])
+        return self._episode_step > 20 and speed < 2.5 and throttle < 0.2
 
     def _stacked_obs(self) -> np.ndarray:
         return np.stack(tuple(self._frames), axis=0).astype(np.uint8, copy=False)

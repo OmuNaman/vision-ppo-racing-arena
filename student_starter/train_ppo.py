@@ -93,10 +93,11 @@ def main() -> None:
                 with torch.no_grad():
                     dist, value = model(obs_t)
                     raw_action = dist.sample()
-                    log_prob = dist.log_prob(raw_action).sum(dim=-1)
+                    bounded_action = raw_action.clamp(-1.0, 1.0)
+                    log_prob = dist.log_prob(bounded_action).sum(dim=-1)
 
-                action = raw_action.squeeze(0).cpu().numpy().astype(np.float32)
-                next_obs, reward, terminated, truncated, info = env.step(np.clip(action, -1.0, 1.0))
+                action = bounded_action.squeeze(0).cpu().numpy().astype(np.float32)
+                next_obs, reward, terminated, truncated, info = env.step(action)
                 if args.render:
                     env.render()
 
@@ -180,12 +181,20 @@ def main() -> None:
             writer.add_scalar("policy_loss", last_policy_loss, global_step)
             writer.add_scalar("value_loss", last_value_loss, global_step)
             writer.add_scalar("entropy", last_entropy, global_step)
+            writer.add_scalar("actions/mean_steer", float(action_buf[:, 0].mean()), global_step)
+            writer.add_scalar("actions/mean_abs_steer", float(np.abs(action_buf[:, 0]).mean()), global_step)
+            writer.add_scalar("actions/mean_throttle", float(action_buf[:, 1].mean()), global_step)
+            writer.add_scalar("actions/mean_brake", float(np.maximum(-action_buf[:, 1], 0.0).mean()), global_step)
 
             elapsed = max(time.time() - start_time, 1e-6)
             print(
                 f"update={update_idx:4d} step={global_step:8d} "
                 f"policy_loss={last_policy_loss:8.4f} value_loss={last_value_loss:8.4f} "
-                f"entropy={last_entropy:6.3f} fps={global_step / elapsed:6.1f}"
+                f"entropy={last_entropy:6.3f} "
+                f"steer={action_buf[:, 0].mean():6.3f} abs_steer={np.abs(action_buf[:, 0]).mean():6.3f} "
+                f"throttle={action_buf[:, 1].mean():6.3f} "
+                f"brake={np.maximum(-action_buf[:, 1], 0.0).mean():6.3f} "
+                f"fps={global_step / elapsed:6.1f}"
             )
 
             while global_step >= next_save_step:
