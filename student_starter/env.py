@@ -152,7 +152,7 @@ class RacingEnv(gym.Env):
         self._route_completion = 0.0
         self._set_topdown_track_agent()
 
-        frame = self._topdown_frame(window=False)
+        frame = self._observation_frame()
         self._frames.clear()
         for _ in range(FRAME_STACK):
             self._frames.append(frame.copy())
@@ -170,7 +170,7 @@ class RacingEnv(gym.Env):
         )
         self._last_opp_obs = obs_dict.get("agent1", self._last_opp_obs)
         self._set_topdown_track_agent()
-        self._frames.append(self._topdown_frame(window=False))
+        self._frames.append(self._observation_frame())
 
         info = self._augment_info(info_dict.get("agent0", {}))
         return (
@@ -194,6 +194,10 @@ class RacingEnv(gym.Env):
     @property
     def unwrapped_metadrive(self):
         return self._env
+
+    def _observation_frame(self) -> np.ndarray:
+        size = TOPDOWN_SCREEN_SIZE if self._show_topdown else CAMERA_SIZE
+        return self._topdown_frame(window=self._show_topdown, size=size)
 
     def _set_topdown_track_agent(self) -> None:
         agent = self._env.agents.get("agent0")
