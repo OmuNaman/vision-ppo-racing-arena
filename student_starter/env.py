@@ -1,16 +1,9 @@
-"""MetaDrive racing environment wrapper with top-down image observations.
+"""3D MetaDrive sky-road arena with stacked RGB camera observations.
 
-This follows the World Model Arena starter pattern: a thin single-agent
-interface over MetaDrive's two-agent ``MultiAgentRacingEnv``. ``agent0`` is the
-student policy, while ``agent1`` is driven by a simple opponent policy.
-
-Difference from the reference starter: this wrapper returns only stacked 2D
-top-down RGB frames, not MetaDrive's vector/LiDAR observation.
-
-Usage:
-    env = RacingEnv(map_name="chicane", opponent_policy="still")
-    obs, _ = env.reset()
-    assert obs.shape == (4, 3, 64, 64)
+The student policy sees only pixels: four consecutive 64x64 RGB frames from
+MetaDrive's vehicle-mounted camera. The world is configured like a narrow
+"sky road": terrain and sidewalks are hidden, the lane is tight, and leaving
+the drivable surface ends the episode with a large fall-style penalty.
 """
 
 from __future__ import annotations
@@ -20,125 +13,127 @@ from typing import Any
 
 import gymnasium as gym
 import numpy as np
-from PIL import Image
 
 
 FRAME_STACK = 4
 CAMERA_SIZE = 64
-TOPDOWN_SCREEN_SIZE = 256
-ROUTE_LENGTH_METERS = 1000.0
 
 
 EVAL_MAPS: dict[str, dict[str, Any]] = {
-    "curve_a": {"map_config": {"type": "block_sequence", "config": "CrCSC"}},
-    "chicane": {"map_config": {"type": "block_sequence", "config": "SCSCS"}},
-    "long_straight": {"map_config": {"type": "block_sequence", "config": "SSSSS"}},
-    "tight_s": {"map_config": {"type": "block_sequence", "config": "CCSCC"}},
-    "oval": {"map_config": {"type": "block_sequence", "config": "SCCS"}},
+    "sky_chicane": {"map_config": {"type": "block_sequence", "config": "SCSCS"}},
+    "sky_curves": {"map_config": {"type": "block_sequence", "config": "CCSCC"}},
+    "sky_slalom": {"map_config": {"type": "block_sequence", "config": "CrCSC"}},
+    "sky_sprint": {"map_config": {"type": "block_sequence", "config": "SSCSS"}},
+    "sky_gauntlet": {"map_config": {"type": "block_sequence", "config": "CSCSC"}},
 }
 EPISODES_PER_MAP = 4
 
-# Backward-compatible aliases used by older local scripts.
+# Backward-compatible aliases used by older local scripts/checkpoints.
 MAP_VARIANTS = EVAL_MAPS
 MAP_ALIASES = {
-    "winding": "chicane",
-    "winding_0": "chicane",
-    "winding_1": "tight_s",
-    "winding_2": "curve_a",
-    "winding_3": "long_straight",
-    "winding_4": "oval",
-    "circuit": "chicane",
+    "winding": "sky_chicane",
+    "winding_0": "sky_chicane",
+    "winding_1": "sky_curves",
+    "winding_2": "sky_slalom",
+    "winding_3": "sky_sprint",
+    "winding_4": "sky_gauntlet",
+    "chicane": "sky_chicane",
+    "tight_s": "sky_curves",
+    "curve_a": "sky_slalom",
+    "long_straight": "sky_sprint",
+    "oval": "sky_gauntlet",
+    "circuit": "sky_chicane",
 }
 
 
-def _make_opponent(name: str):
-    """Returns a callable ``obs -> action`` for agent1."""
-    rng = np.random.default_rng(0)
-
-    def random_policy(_obs):
-        return rng.uniform(-1, 1, size=(2,)).astype(np.float32)
-
-    def aggressive_policy(_obs):
-        return np.array([0.0, 1.0], dtype=np.float32)
-
-    def still_policy(_obs):
-        return np.array([0.0, 0.0], dtype=np.float32)
-
-    table = {
-        "random": random_policy,
-        "aggressive": aggressive_policy,
-        "still": still_policy,
-    }
-    if name not in table:
-        raise ValueError(f"unknown opponent policy: {name}")
-    return table[name]
-
-
-class _FakeMainCamera:
-    """Small camera shim so MetaDrive's top-down renderer tracks agent0."""
-
-    CHASE_TASK_NAME = "_fake_topdown_chase_task"
-
-    def __init__(self, agent):
-        self.current_track_agent = agent
-
-    def destroy(self) -> None:
-        pass
-
-
 class RacingEnv(gym.Env):
-    """Single-agent Gymnasium wrapper around MetaDrive's 2-agent racing env."""
+    """Single-agent Gymnasium wrapper around MetaDriveEnv."""
 
     metadata = {"render_modes": ["human"]}
 
     def __init__(
         self,
-        map_name: str = "chicane",
+        map_name: str = "sky_chicane",
         opponent_policy: str = "still",
         render: bool = False,
         seed: int | None = None,
         horizon: int = 3000,
     ) -> None:
         super().__init__()
-        from metadrive.envs.marl_envs.marl_racing_env import MultiAgentRacingEnv
+        from metadrive.component.sensors.rgb_camera import RGBCamera
+        from metadrive.envs.metadrive_env import MetaDriveEnv
 
-        self._opponent = _make_opponent(opponent_policy)
+        del opponent_policy  # Kept only so older training scripts still import.
+
         self._map_name = MAP_ALIASES.get(map_name, map_name)
         self._base_seed = 0 if seed is None else int(seed)
-        self._show_topdown = bool(render)
-        self._last_opp_obs = None
         self._frames: deque[np.ndarray] = deque(maxlen=FRAME_STACK)
-        self._route_completion = 0.0
+        self._last_info: dict[str, Any] = {}
+        self._episode_step = 0
 
-        map_cfg = EVAL_MAPS.get(self._map_name, EVAL_MAPS["chicane"])
-        config: dict[str, Any] = {
-            "num_agents": 2,
-            "num_scenarios": 100_000,
-            "start_seed": 0,
-            # We keep Panda3D's 3D window off. render=True means show top-down.
-            "use_render": False,
-            "horizon": horizon,
-            "out_of_road_done": True,
-            "idle_done": False,
-            "traffic_density": 0.0,
-            "random_agent_model": False,
-            "map_config": {
-                "lane_num": 2,
-                "lane_width": 3.5,
-                **map_cfg.get("map_config", {}),
-            },
-            # A little extra push against slow/stalled policies.
-            "driving_reward": 1.0,
-            "speed_reward": 0.3,
-            "idle_penalty": 5.0,
-            "success_reward": 20.0,
-            "out_of_road_penalty": 5.0,
-            "crash_sidewalk_penalty": 5.0,
-            "log_level": 50,
-        }
-        self._env = MultiAgentRacingEnv(config=config)
+        map_cfg = EVAL_MAPS.get(self._map_name, EVAL_MAPS["sky_chicane"])
+        self._env = MetaDriveEnv(
+            config={
+                "num_scenarios": 100_000,
+                "start_seed": 0,
+                "use_render": bool(render),
+                "image_observation": True,
+                "image_on_cuda": False,
+                "norm_pixel": False,
+                "stack_size": 1,
+                "sensors": {"rgb_camera": (RGBCamera, CAMERA_SIZE, CAMERA_SIZE)},
+                "vehicle_config": {
+                    "image_source": "rgb_camera",
+                    "show_navi_mark": False,
+                    "show_dest_mark": False,
+                    "show_navigation_arrow": False,
+                    "show_lidar": False,
+                    "show_lane_line_detector": False,
+                    "show_side_detector": False,
+                },
+                "interface_panel": ["dashboard", "rgb_camera"] if render else [],
+                "show_interface": bool(render),
+                "show_logo": False,
+                "show_fps": bool(render),
+                # Hide the ground/shoulders so the road reads like a floating
+                # platform. The physics remains MetaDrive's real road physics.
+                "show_terrain": False,
+                "show_sidewalk": False,
+                "show_crosswalk": False,
+                "horizon": horizon,
+                "out_of_road_done": True,
+                "crash_vehicle_done": True,
+                "crash_object_done": True,
+                "on_continuous_line_done": False,
+                "on_broken_line_done": False,
+                "traffic_density": 0.06,
+                "random_traffic": True,
+                "accident_prob": 0.35,
+                "static_traffic_object": True,
+                "random_agent_model": False,
+                "random_spawn_lane_index": False,
+                "map": 3,
+                "map_config": {
+                    "lane_num": 1,
+                    "lane_width": 3.0,
+                    "exit_length": 35,
+                    **map_cfg.get("map_config", {}),
+                },
+                # Base MetaDrive shaping: forward progress, speed, lateral
+                # centering, then large sparse penalties/bonus below.
+                "driving_reward": 1.2,
+                "speed_reward": 0.35,
+                "use_lateral_reward": True,
+                "success_reward": 80.0,
+                "out_of_road_penalty": 50.0,
+                "crash_vehicle_penalty": 30.0,
+                "crash_object_penalty": 30.0,
+                "crash_sidewalk_penalty": 50.0,
+                "log_level": 50,
+            }
+        )
 
-        self.action_space = self._env.action_space["agent0"]
+        self.action_space = self._env.action_space
         self.observation_space = gym.spaces.Box(
             low=0,
             high=255,
@@ -147,43 +142,34 @@ class RacingEnv(gym.Env):
         )
 
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
-        obs_dict, info_dict = self._env.reset(seed=self._base_seed if seed is None else seed)
-        self._last_opp_obs = obs_dict.get("agent1")
-        self._route_completion = 0.0
-        self._set_topdown_track_agent()
-
-        frame = self._observation_frame()
+        raw_obs, info = self._env.reset(seed=self._base_seed if seed is None else seed)
+        self._episode_step = 0
+        frame = self._rgb_frame(raw_obs)
         self._frames.clear()
         for _ in range(FRAME_STACK):
             self._frames.append(frame.copy())
-
-        info = self._augment_info(info_dict.get("agent0", {}))
-        return self._stacked_obs(), info
+        self._last_info = self._augment_info(info)
+        return self._stacked_obs(), self._last_info
 
     def step(self, action):
-        opp_action = self._opponent(self._last_opp_obs)
-        obs_dict, r_dict, d_dict, t_dict, info_dict = self._env.step(
-            {
-                "agent0": np.asarray(action, dtype=np.float32).clip(-1.0, 1.0),
-                "agent1": opp_action,
-            }
+        raw_obs, default_reward, terminated, truncated, info = self._env.step(
+            np.asarray(action, dtype=np.float32).clip(-1.0, 1.0)
         )
-        self._last_opp_obs = obs_dict.get("agent1", self._last_opp_obs)
-        self._set_topdown_track_agent()
-        self._frames.append(self._observation_frame())
-
-        info = self._augment_info(info_dict.get("agent0", {}))
-        return (
-            self._stacked_obs(),
-            float(r_dict.get("agent0", 0.0)),
-            bool(d_dict.get("agent0", False)),
-            bool(t_dict.get("agent0", False)),
-            info,
-        )
+        self._episode_step += 1
+        self._frames.append(self._rgb_frame(raw_obs))
+        info = self._augment_info(info)
+        reward = self._sky_reward(float(default_reward), info)
+        self._last_info = info
+        return self._stacked_obs(), reward, bool(terminated), bool(truncated), info
 
     def render(self):
-        self._set_topdown_track_agent()
-        return self._topdown_frame(window=self._show_topdown, size=TOPDOWN_SCREEN_SIZE)
+        text = {
+            "map": self._map_name,
+            "reward": f"{self._last_info.get('sky_reward', 0.0):.2f}",
+            "completion": f"{self._last_info.get('route_completion', 0.0):.1%}",
+            "speed": f"{self._last_info.get('speed_km_h', 0.0):.1f} km/h",
+        }
+        return self._env.render(text=text)
 
     def close(self) -> None:
         try:
@@ -195,61 +181,79 @@ class RacingEnv(gym.Env):
     def unwrapped_metadrive(self):
         return self._env
 
-    def _observation_frame(self) -> np.ndarray:
-        size = TOPDOWN_SCREEN_SIZE if self._show_topdown else CAMERA_SIZE
-        return self._topdown_frame(window=self._show_topdown, size=size)
-
-    def _set_topdown_track_agent(self) -> None:
-        agent = self._env.agents.get("agent0")
-        if agent is None:
-            return
-        main_camera = getattr(self._env.engine, "main_camera", None)
-        if main_camera is not None and hasattr(main_camera, "current_track_agent"):
-            main_camera.current_track_agent = agent
-        else:
-            self._env.engine.main_camera = _FakeMainCamera(agent)
+    def _rgb_frame(self, raw_obs: Any) -> np.ndarray:
+        image = raw_obs["image"] if isinstance(raw_obs, dict) else raw_obs
+        image = np.asarray(image)
+        if image.ndim == 4:
+            image = image[..., -1]
+        if image.dtype != np.uint8:
+            if float(np.nanmax(image)) <= 1.5:
+                image = image * 255.0
+            image = np.clip(image, 0, 255).astype(np.uint8)
+        if image.shape[:2] != (CAMERA_SIZE, CAMERA_SIZE):
+            raise ValueError(f"expected RGB camera {(CAMERA_SIZE, CAMERA_SIZE)}, got {image.shape}")
+        return np.transpose(image[..., :3], (2, 0, 1))
 
     def _augment_info(self, info: dict[str, Any]) -> dict[str, Any]:
         clean = dict(info)
         clean["map_name"] = self._map_name
-        progress = float(clean.get("progress", 0.0))
-        self._route_completion = float(np.clip(self._route_completion + max(progress, 0.0) / ROUTE_LENGTH_METERS, 0.0, 1.0))
-        agent = self._env.agents.get("agent0")
+        agent = getattr(self._env, "agent", None)
         if agent is not None:
-            nav_completion = float(getattr(agent.navigation, "route_completion", 0.0))
-            clean["route_completion"] = max(self._route_completion, nav_completion)
             clean["speed_km_h"] = float(max(getattr(agent, "speed_km_h", 0.0), 0.0))
+            clean["route_completion"] = float(getattr(agent.navigation, "route_completion", 0.0))
+            clean["center_score"] = self._center_score(agent)
+            clean["on_lane"] = bool(getattr(agent, "on_lane", False))
         else:
-            clean["route_completion"] = self._route_completion
+            clean.setdefault("speed_km_h", 0.0)
+            clean.setdefault("route_completion", 0.0)
+            clean.setdefault("center_score", 0.0)
+            clean.setdefault("on_lane", False)
         return clean
 
-    def _topdown_frame(self, window: bool, size: int = CAMERA_SIZE) -> np.ndarray:
-        frame = self._env.render(
-            mode="topdown",
-            window=window,
-            screen_size=(size, size),
-            film_size=(3000, 3000),
-            semantic_map=False,
-            show_agent_name=False,
-            target_agent_heading_up=True,
-            draw_target_vehicle_trajectory=False,
-            draw_contour=True,
-            num_stack=1,
-        )
-        if frame is None:
-            raise RuntimeError("MetaDrive top-down renderer returned no frame")
-        image = np.asarray(frame)
-        if image.shape[-1] == 4:
-            image = image[..., :3]
-        if image.dtype != np.uint8:
-            image = np.clip(image, 0, 255).astype(np.uint8)
-        if image.shape[0] != CAMERA_SIZE or image.shape[1] != CAMERA_SIZE:
-            image = np.asarray(Image.fromarray(image).resize((CAMERA_SIZE, CAMERA_SIZE), Image.Resampling.BILINEAR))
-        return np.transpose(image, (2, 0, 1))
+    def _center_score(self, agent) -> float:
+        if not getattr(agent, "on_lane", False) or getattr(agent, "lane", None) is None:
+            return 0.0
+        _longitudinal, lateral = agent.lane.local_coordinates(agent.position)
+        width = max(float(agent.navigation.get_current_lane_width()), 1e-6)
+        return float(np.clip(1.0 - abs(lateral) / (0.5 * width), 0.0, 1.0))
+
+    def _sky_reward(self, default_reward: float, info: dict[str, Any]) -> float:
+        reward = default_reward
+        speed = float(info.get("speed_km_h", 0.0))
+        center = float(info.get("center_score", 0.0))
+
+        reward += 0.08 * center
+        reward -= 0.10 * (1.0 - center)
+        reward += 0.04 * min(speed / 35.0, 1.0)
+
+        if self._episode_step > 20 and speed < 2.0:
+            reward -= 0.35
+            info["idle_penalty_active"] = True
+        else:
+            info["idle_penalty_active"] = False
+
+        if info.get("arrive_dest", False):
+            reward = 100.0
+            info["terminal_reason"] = "finish"
+        elif info.get("out_of_road", False):
+            reward = -60.0
+            info["terminal_reason"] = "fell_off_sky_road"
+        elif info.get("crash_object", False):
+            reward = -35.0
+            info["terminal_reason"] = "hit_obstacle"
+        elif info.get("crash_vehicle", False):
+            reward = -35.0
+            info["terminal_reason"] = "hit_traffic"
+        elif info.get("crash_sidewalk", False):
+            reward = -60.0
+            info["terminal_reason"] = "hit_edge"
+
+        info["sky_reward"] = float(reward)
+        return float(reward)
 
     def _stacked_obs(self) -> np.ndarray:
         return np.stack(tuple(self._frames), axis=0).astype(np.uint8, copy=False)
 
 
-def make_env(map_name: str = "chicane", render: bool = False, seed: int | None = None) -> RacingEnv:
+def make_env(map_name: str = "sky_chicane", render: bool = False, seed: int | None = None) -> RacingEnv:
     return RacingEnv(map_name=map_name, opponent_policy="still", render=render, seed=seed)

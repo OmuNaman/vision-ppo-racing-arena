@@ -115,8 +115,13 @@ def record_topdown_video(checkpoint: str, map_name: str, out_path: str, max_step
     env = RacingEnv(map_name=map_name, render=False)
 
     class _FakeMainCamera:
+        CHASE_TASK_NAME = "_fake_topdown_chase_task"
+
         def __init__(self, agent):
             self.current_track_agent = agent
+
+        def destroy(self):
+            pass
 
     frames = []
     obs, _info = env.reset()
@@ -125,7 +130,11 @@ def record_topdown_video(checkpoint: str, map_name: str, out_path: str, max_step
     if agent is None and hasattr(md_env, "agents"):
         agent = md_env.agents.get("agent0")
     if agent is not None:
-        md_env.engine.main_camera = _FakeMainCamera(agent)
+        main_camera = getattr(md_env.engine, "main_camera", None)
+        if main_camera is not None and hasattr(main_camera, "current_track_agent"):
+            main_camera.current_track_agent = agent
+        else:
+            md_env.engine.main_camera = _FakeMainCamera(agent)
 
     try:
         for _step in range(max_steps):
@@ -224,7 +233,7 @@ def main() -> None:
         print(f"ERROR: checkpoint not found: {checkpoint}")
         sys.exit(1)
 
-    print(f"Evaluating {checkpoint} on {len(SUBMIT_MAPS)} winding variants")
+    print(f"Evaluating {checkpoint} on {len(SUBMIT_MAPS)} sky-road variants")
     results = evaluate_variants(str(checkpoint))
     print("\nEvaluation summary")
     print(json.dumps({k: v for k, v in results.items() if k != "episodes"}, indent=2))

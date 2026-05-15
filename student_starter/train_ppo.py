@@ -1,4 +1,4 @@
-"""Train PPO from scratch on the vision-only MetaDrive arena."""
+"""Train PPO from scratch on the 3D pixel-only MetaDrive sky-road arena."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ SAVE_EVERY = 50_000
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train a pixel-only PPO driver in MetaDrive.")
     parser.add_argument("--steps", type=int, default=1_000_000, help="Total environment steps.")
-    parser.add_argument("--render", action="store_true", help="Open the Panda3D window while training.")
+    parser.add_argument("--render", action="store_true", help="Open the Panda3D 3D window while training.")
     parser.add_argument("--lr", type=float, default=2.5e-4, help="Adam learning rate.")
     parser.add_argument("--seed", type=int, default=0, help="Random seed.")
     parser.add_argument("--checkpoint", type=str, default="checkpoints/policy.pt", help="Checkpoint path.")
@@ -189,11 +189,11 @@ def main() -> None:
             )
 
             while global_step >= next_save_step:
-                model.save(checkpoint_path, global_step=global_step, map_name="winding")
+                model.save(checkpoint_path, global_step=global_step, map_name="sky_chicane")
                 print(f"saved checkpoint -> {checkpoint_path}")
                 next_save_step += SAVE_EVERY
 
-        model.save(checkpoint_path, global_step=global_step, map_name="winding")
+        model.save(checkpoint_path, global_step=global_step, map_name="sky_chicane")
         print(f"final checkpoint -> {checkpoint_path}")
     finally:
         writer.close()
@@ -202,4 +202,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

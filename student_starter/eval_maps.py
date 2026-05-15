@@ -1,12 +1,11 @@
-"""Evaluation maps for the image-based racing arena."""
+"""Evaluation maps for the 3D sky-road racing arena."""
 
 EVAL_MAPS = {
-    "curve_a": {"map_config": {"type": "block_sequence", "config": "CrCSC"}},
-    "chicane": {"map_config": {"type": "block_sequence", "config": "SCSCS"}},
-    "long_straight": {"map_config": {"type": "block_sequence", "config": "SSSSS"}},
-    "tight_s": {"map_config": {"type": "block_sequence", "config": "CCSCC"}},
-    "oval": {"map_config": {"type": "block_sequence", "config": "SCCS"}},
+    "sky_chicane": {"map_config": {"type": "block_sequence", "config": "SCSCS"}},
+    "sky_curves": {"map_config": {"type": "block_sequence", "config": "CCSCC"}},
+    "sky_slalom": {"map_config": {"type": "block_sequence", "config": "CrCSC"}},
+    "sky_sprint": {"map_config": {"type": "block_sequence", "config": "SSCSS"}},
+    "sky_gauntlet": {"map_config": {"type": "block_sequence", "config": "CSCSC"}},
 }
 
 EPISODES_PER_MAP = 4
-

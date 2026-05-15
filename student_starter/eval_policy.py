@@ -1,4 +1,4 @@
-"""Evaluate a saved PPO policy on the winding MetaDrive track."""
+"""Evaluate a saved PPO policy on the 3D MetaDrive sky-road track."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ def evaluate(
     checkpoint: str,
     episodes: int = 20,
     render: bool = False,
-    map_name: str = "chicane",
+    map_name: str = "sky_chicane",
     seed: int = 10_000,
 ):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -70,7 +70,7 @@ def main() -> None:
     parser.add_argument("--checkpoint", type=str, default="checkpoints/policy.pt")
     parser.add_argument("--episodes", type=int, default=20)
     parser.add_argument("--render", action="store_true")
-    parser.add_argument("--map", type=str, default="chicane")
+    parser.add_argument("--map", type=str, default="sky_chicane")
     args = parser.parse_args()
 
     results = evaluate(args.checkpoint, episodes=args.episodes, render=args.render, map_name=args.map)
