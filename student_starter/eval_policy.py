@@ -15,13 +15,12 @@ def evaluate(
     checkpoint: str,
     episodes: int = 20,
     render: bool = False,
-    map_name: str = "sky_chicane",
     seed: int = 10_000,
 ):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     policy = CNNActorCritic.load(checkpoint, device=device)
     policy.eval()
-    env = RacingEnv(map_name=map_name, render=render, seed=seed)
+    env = RacingEnv(render=render, seed=seed)
 
     returns: list[float] = []
     lengths: list[int] = []
@@ -70,10 +69,9 @@ def main() -> None:
     parser.add_argument("--checkpoint", type=str, default="checkpoints/policy.pt")
     parser.add_argument("--episodes", type=int, default=20)
     parser.add_argument("--render", action="store_true")
-    parser.add_argument("--map", type=str, default="sky_chicane")
     args = parser.parse_args()
 
-    results = evaluate(args.checkpoint, episodes=args.episodes, render=args.render, map_name=args.map)
+    results = evaluate(args.checkpoint, episodes=args.episodes, render=args.render)
     print("\nEvaluation summary")
     print(f"mean return:          {results['mean_return']:.2f}")
     print(f"mean episode length:  {results['mean_episode_length']:.1f}")

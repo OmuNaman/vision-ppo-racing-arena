@@ -14,37 +14,36 @@ from typing import Any
 import gymnasium as gym
 import numpy as np
 
+import reward_config as cfg
+
 
 FRAME_STACK = 4
 CAMERA_SIZE = 64
-STEERING_SCALE = 0.30
-THROTTLE_SCALE = 0.75
+DEFAULT_MAP_NAME = "sky_chicane"
+DEFAULT_MAP_CONFIG: dict[str, Any] = {"type": "block_sequence", "config": "SCSCS"}
 
 
 EVAL_MAPS: dict[str, dict[str, Any]] = {
-    "sky_chicane": {"map_config": {"type": "block_sequence", "config": "SCSCS"}},
-    "sky_curves": {"map_config": {"type": "block_sequence", "config": "CCSCC"}},
-    "sky_slalom": {"map_config": {"type": "block_sequence", "config": "CrCSC"}},
-    "sky_sprint": {"map_config": {"type": "block_sequence", "config": "SSCSS"}},
-    "sky_gauntlet": {"map_config": {"type": "block_sequence", "config": "CSCSC"}},
+    DEFAULT_MAP_NAME: {"map_config": DEFAULT_MAP_CONFIG},
 }
 EPISODES_PER_MAP = 4
 
-# Backward-compatible aliases used by older local scripts/checkpoints.
+# Backward-compatible aliases used by older local scripts/checkpoints. They all
+# resolve to the single default map so there is no hidden curriculum behavior.
 MAP_VARIANTS = EVAL_MAPS
 MAP_ALIASES = {
-    "winding": "sky_chicane",
-    "winding_0": "sky_chicane",
-    "winding_1": "sky_curves",
-    "winding_2": "sky_slalom",
-    "winding_3": "sky_sprint",
-    "winding_4": "sky_gauntlet",
-    "chicane": "sky_chicane",
-    "tight_s": "sky_curves",
-    "curve_a": "sky_slalom",
-    "long_straight": "sky_sprint",
-    "oval": "sky_gauntlet",
-    "circuit": "sky_chicane",
+    "winding": DEFAULT_MAP_NAME,
+    "winding_0": DEFAULT_MAP_NAME,
+    "winding_1": DEFAULT_MAP_NAME,
+    "winding_2": DEFAULT_MAP_NAME,
+    "winding_3": DEFAULT_MAP_NAME,
+    "winding_4": DEFAULT_MAP_NAME,
+    "chicane": DEFAULT_MAP_NAME,
+    "tight_s": DEFAULT_MAP_NAME,
+    "curve_a": DEFAULT_MAP_NAME,
+    "long_straight": DEFAULT_MAP_NAME,
+    "oval": DEFAULT_MAP_NAME,
+    "circuit": DEFAULT_MAP_NAME,
 }
 
 
@@ -55,7 +54,7 @@ class RacingEnv(gym.Env):
 
     def __init__(
         self,
-        map_name: str = "sky_chicane",
+        map_name: str = DEFAULT_MAP_NAME,
         opponent_policy: str = "still",
         render: bool = False,
         seed: int | None = None,
@@ -74,7 +73,7 @@ class RacingEnv(gym.Env):
         self._episode_step = 0
         self._stall_steps = 0
 
-        map_cfg = EVAL_MAPS.get(self._map_name, EVAL_MAPS["sky_chicane"])
+        map_cfg = EVAL_MAPS[DEFAULT_MAP_NAME]
         self._env = MetaDriveEnv(
             config={
                 "num_scenarios": 100_000,
@@ -124,14 +123,14 @@ class RacingEnv(gym.Env):
                 },
                 # Base MetaDrive shaping: forward progress, speed, lateral
                 # centering, then large sparse penalties/bonus below.
-                "driving_reward": 1.2,
-                "speed_reward": 0.35,
-                "use_lateral_reward": True,
-                "success_reward": 80.0,
-                "out_of_road_penalty": 50.0,
-                "crash_vehicle_penalty": 30.0,
-                "crash_object_penalty": 30.0,
-                "crash_sidewalk_penalty": 50.0,
+                "driving_reward": cfg.BASE_DRIVING_REWARD,
+                "speed_reward": cfg.BASE_SPEED_REWARD,
+                "use_lateral_reward": cfg.USE_LATERAL_REWARD,
+                "success_reward": cfg.BASE_SUCCESS_REWARD,
+                "out_of_road_penalty": cfg.BASE_OUT_OF_ROAD_PENALTY,
+                "crash_vehicle_penalty": cfg.BASE_CRASH_VEHICLE_PENALTY,
+                "crash_object_penalty": cfg.BASE_CRASH_OBJECT_PENALTY,
+                "crash_sidewalk_penalty": cfg.BASE_CRASH_SIDEWALK_PENALTY,
                 "log_level": 50,
             }
         )
@@ -158,9 +157,9 @@ class RacingEnv(gym.Env):
     def step(self, action):
         clipped_action = np.asarray(action, dtype=np.float32).clip(-1.0, 1.0)
         env_action = clipped_action.copy()
-        env_action[0] *= STEERING_SCALE
+        env_action[0] *= cfg.STEERING_SCALE
         if env_action[1] > 0.0:
-            env_action[1] *= THROTTLE_SCALE
+            env_action[1] *= cfg.THROTTLE_SCALE
         raw_obs, default_reward, terminated, truncated, info = self._env.step(env_action)
         self._episode_step += 1
         self._frames.append(self._rgb_frame(raw_obs))
@@ -174,8 +173,8 @@ class RacingEnv(gym.Env):
         else:
             self._stall_steps = 0
         info["stall_steps"] = self._stall_steps
-        if self._stall_steps >= 35:
-            reward = -120.0
+        if self._stall_steps >= cfg.STALL_AFTER_STEPS:
+            reward = cfg.STALL_TERMINAL_REWARD
             info["sky_reward"] = reward
             info["terminal_reason"] = "stalled_on_sky_road"
             terminated = True
@@ -248,46 +247,54 @@ class RacingEnv(gym.Env):
         brake = max(float(-action[1]), 0.0)
 
         off_center = 1.0 - center
-        reward += 0.12 * center
-        reward -= 0.45 * (off_center**2)
-        reward += 0.04 * min(speed / 35.0, 1.0)
-        if speed > 35.0:
-            reward -= 0.03 * ((speed - 35.0) / 5.0)
-        reward += 0.04 * throttle * (1.0 if speed < 35.0 else 0.25)
+        reward += cfg.CENTER_BONUS * center
+        reward -= cfg.OFF_CENTER_PENALTY * (off_center**2)
+        reward += cfg.SPEED_BONUS * min(speed / cfg.MAX_REWARDED_SPEED_KMH, 1.0)
+        if speed > cfg.MAX_REWARDED_SPEED_KMH:
+            reward -= cfg.OVERSPEED_PENALTY * (
+                (speed - cfg.MAX_REWARDED_SPEED_KMH) / cfg.OVERSPEED_PENALTY_STEP_KMH
+            )
+        reward += cfg.THROTTLE_BONUS * throttle * (
+            1.0 if speed < cfg.MAX_REWARDED_SPEED_KMH else cfg.THROTTLE_BONUS_WHEN_OVERSPEED
+        )
 
-        steering_penalty = 0.03 * steer + 0.10 * steer * min(speed / 25.0, 1.0) + 0.22 * steer * off_center
+        steering_penalty = (
+            cfg.STEERING_BASE_PENALTY * steer
+            + cfg.STEERING_SPEED_PENALTY * steer * min(speed / cfg.STEERING_SPEED_REFERENCE_KMH, 1.0)
+            + cfg.STEERING_EDGE_PENALTY * steer * off_center
+        )
         reward -= steering_penalty
         info["steering_penalty"] = float(steering_penalty)
 
-        brake_penalty = 0.50 * brake
-        if speed < 12.0:
-            brake_penalty += 2.00 * brake
-        if self._episode_step > 20 and speed < 3.0:
-            brake_penalty += 2.00 * brake
+        brake_penalty = cfg.BRAKE_BASE_PENALTY * brake
+        if speed < cfg.LOW_SPEED_BRAKE_THRESHOLD_KMH:
+            brake_penalty += cfg.LOW_SPEED_BRAKE_EXTRA_PENALTY * brake
+        if self._episode_step > cfg.IDLE_AFTER_STEPS and speed < cfg.IDLE_BRAKE_THRESHOLD_KMH:
+            brake_penalty += cfg.IDLE_BRAKE_EXTRA_PENALTY * brake
         reward -= brake_penalty
         info["brake_amount"] = brake
         info["brake_penalty"] = float(brake_penalty)
 
-        if self._episode_step > 20 and speed < 2.0:
-            reward -= 0.35
+        if self._episode_step > cfg.IDLE_AFTER_STEPS and speed < cfg.IDLE_SPEED_THRESHOLD_KMH:
+            reward -= cfg.IDLE_STEP_PENALTY
             info["idle_penalty_active"] = True
         else:
             info["idle_penalty_active"] = False
 
         if info.get("arrive_dest", False):
-            reward = 100.0
+            reward = cfg.FINISH_REWARD
             info["terminal_reason"] = "finish"
         elif info.get("out_of_road", False):
-            reward = -60.0
+            reward = cfg.FALL_OFF_ROAD_REWARD
             info["terminal_reason"] = "fell_off_sky_road"
         elif info.get("crash_object", False):
-            reward = -35.0
+            reward = cfg.HIT_OBSTACLE_REWARD
             info["terminal_reason"] = "hit_obstacle"
         elif info.get("crash_vehicle", False):
-            reward = -35.0
+            reward = cfg.HIT_TRAFFIC_REWARD
             info["terminal_reason"] = "hit_traffic"
         elif info.get("crash_sidewalk", False):
-            reward = -60.0
+            reward = cfg.HIT_EDGE_REWARD
             info["terminal_reason"] = "hit_edge"
 
         info["sky_reward"] = float(reward)
@@ -296,11 +303,15 @@ class RacingEnv(gym.Env):
     def _is_stalling(self, info: dict[str, Any], action: np.ndarray) -> bool:
         speed = float(info.get("speed_km_h", 0.0))
         throttle = float(action[1])
-        return self._episode_step > 20 and speed < 2.5 and throttle < 0.2
+        return (
+            self._episode_step > cfg.IDLE_AFTER_STEPS
+            and speed < cfg.STALL_SPEED_THRESHOLD_KMH
+            and throttle < cfg.STALL_THROTTLE_THRESHOLD
+        )
 
     def _stacked_obs(self) -> np.ndarray:
         return np.stack(tuple(self._frames), axis=0).astype(np.uint8, copy=False)
 
 
-def make_env(map_name: str = "sky_chicane", render: bool = False, seed: int | None = None) -> RacingEnv:
+def make_env(map_name: str = DEFAULT_MAP_NAME, render: bool = False, seed: int | None = None) -> RacingEnv:
     return RacingEnv(map_name=map_name, opponent_policy="still", render=render, seed=seed)
