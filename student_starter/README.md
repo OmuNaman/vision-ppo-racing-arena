@@ -41,6 +41,8 @@ The reward uses MetaDrive's forward-driving reward as the base, then adds sky-ro
 
 - Forward progress and speed are rewarded.
 - Staying near the lane center gets a small bonus.
+- Positive throttle gets a small bonus.
+- Braking is penalized, especially at low speed or when already nearly idle.
 - Crawling/idling after the first few steps gets a recurring penalty.
 - Reaching the finish gives `+100`.
 - Falling off the road gives `-60`.

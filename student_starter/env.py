@@ -152,13 +152,12 @@ class RacingEnv(gym.Env):
         return self._stacked_obs(), self._last_info
 
     def step(self, action):
-        raw_obs, default_reward, terminated, truncated, info = self._env.step(
-            np.asarray(action, dtype=np.float32).clip(-1.0, 1.0)
-        )
+        clipped_action = np.asarray(action, dtype=np.float32).clip(-1.0, 1.0)
+        raw_obs, default_reward, terminated, truncated, info = self._env.step(clipped_action)
         self._episode_step += 1
         self._frames.append(self._rgb_frame(raw_obs))
         info = self._augment_info(info)
-        reward = self._sky_reward(float(default_reward), info)
+        reward = self._sky_reward(float(default_reward), info, clipped_action)
         self._last_info = info
         return self._stacked_obs(), reward, bool(terminated), bool(truncated), info
 
@@ -217,14 +216,26 @@ class RacingEnv(gym.Env):
         width = max(float(agent.navigation.get_current_lane_width()), 1e-6)
         return float(np.clip(1.0 - abs(lateral) / (0.5 * width), 0.0, 1.0))
 
-    def _sky_reward(self, default_reward: float, info: dict[str, Any]) -> float:
+    def _sky_reward(self, default_reward: float, info: dict[str, Any], action: np.ndarray) -> float:
         reward = default_reward
         speed = float(info.get("speed_km_h", 0.0))
         center = float(info.get("center_score", 0.0))
+        throttle = max(float(action[1]), 0.0)
+        brake = max(float(-action[1]), 0.0)
 
         reward += 0.08 * center
         reward -= 0.10 * (1.0 - center)
         reward += 0.04 * min(speed / 35.0, 1.0)
+        reward += 0.04 * throttle * (1.0 if speed < 35.0 else 0.25)
+
+        brake_penalty = 0.18 * brake
+        if speed < 12.0:
+            brake_penalty += 0.35 * brake
+        if self._episode_step > 20 and speed < 3.0:
+            brake_penalty += 0.35 * brake
+        reward -= brake_penalty
+        info["brake_amount"] = brake
+        info["brake_penalty"] = float(brake_penalty)
 
         if self._episode_step > 20 and speed < 2.0:
             reward -= 0.35
