@@ -186,7 +186,7 @@ class RacingEnv(gym.Env):
         road_reward = 0.2 if on_road and moving_forward else 0.0
         speed_km_h = self._speed_km_h()
         speed_score = min(max(speed_km_h, 0.0) / 35.0, 1.0)
-        speed_reward = 0.6 * speed_score if on_road and moving_forward else (-0.3 if on_road else 0.0)
+        speed_reward = 0.6 * speed_score if on_road and moving_forward else (-1.0 if on_road else 0.0)
         offroad_penalty = -1.0 if not on_road else 0.0
         crash_penalty = -10.0 if self._crashed(info) else 0.0
         finish_bonus = 20.0 if self._arrived(info) else 0.0
