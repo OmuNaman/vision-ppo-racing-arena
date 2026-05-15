@@ -1,6 +1,6 @@
 # Vision-Based PPO Racing Arena
 
-Students train a PPO agent to drive a MetaDrive car from raw RGB camera frames only. The policy never receives lidar, route vectors, vehicle state, or privileged simulator observations.
+Students train a PPO agent to drive a MetaDrive racing car from raw 2D top-down image frames only. The policy never receives lidar, route vectors, vehicle state, or privileged simulator observations.
 
 ## Setup In 3 Commands
 
@@ -27,7 +27,7 @@ Headless training:
 .\.venv\Scripts\python.exe train_ppo.py --steps 1000000
 ```
 
-Watch the Panda3D 3D window while the car learns:
+Watch the top-down racing view while the car learns:
 
 ```powershell
 .\.venv\Scripts\python.exe train_ppo.py --steps 1000000 --render
@@ -59,7 +59,7 @@ Then submit:
 .\.venv\Scripts\python.exe submit.py --checkpoint checkpoints/policy.pt --tag first-run --name "Your Name" --uid your-id
 ```
 
-`submit.py` evaluates on 5 winding track variants, records a top-down MP4 with MetaDrive's topdown renderer and `mediapy`, uploads the result to the Supabase `submissions` table, then prints a leaderboard summary.
+`submit.py` evaluates on 5 leaderboard maps, records a top-down MP4 with MetaDrive's topdown renderer and `mediapy`, uploads the result to the Supabase `submissions` table, then prints a leaderboard summary.
 
 For a local dry run without upload:
 
@@ -69,7 +69,8 @@ For a local dry run without upload:
 
 ## Files
 
-- `env.py`: MetaDrive wrapper with 64x64 RGB camera input, narrow S-curve/chicane maps, deque frame stacking to `(4, 3, 64, 64)`, and custom reward.
+- `env.py`: Reference-style wrapper around MetaDrive `MultiAgentRacingEnv`; `agent0` is the student ego, `agent1` is a still/random/aggressive opponent, and PPO receives deque-stacked 2D top-down RGB frames shaped `(4, 3, 64, 64)`.
+- `eval_maps.py`: The 5 leaderboard map names/configs and episodes-per-map setting.
 - `model.py`: CNN actor-critic with diagonal Normal continuous action policy.
 - `train_ppo.py`: PyTorch PPO with GAE, clipping, entropy bonus, TensorBoard logging, gradient clipping, and checkpointing.
 - `eval_policy.py`: Deterministic checkpoint evaluation.

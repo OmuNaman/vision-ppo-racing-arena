@@ -4,7 +4,9 @@ student_starter/**/__pycache__/
 student_starter/runs/
 student_starter/checkpoints/*.pt
 student_starter/videos/*.mp4
+student_starter/debug_frames/
 student_starter/.env
+_reference_world_model_arena/
 
 !student_starter/checkpoints/.gitkeep
 !student_starter/videos/.gitkeep

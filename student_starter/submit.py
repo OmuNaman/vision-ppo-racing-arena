@@ -13,11 +13,12 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from env import MAP_VARIANTS, RacingEnv
+from eval_maps import EVAL_MAPS
+from env import RacingEnv
 from model import CNNActorCritic
 
 
-SUBMIT_MAPS = ["winding_0", "winding_1", "winding_2", "winding_3", "winding_4"]
+SUBMIT_MAPS = list(EVAL_MAPS.keys())
 
 
 def load_dotenv() -> None:
@@ -244,4 +245,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
