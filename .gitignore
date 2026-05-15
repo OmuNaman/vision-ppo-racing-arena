@@ -1,0 +1,10 @@
+student_starter/.venv/
+student_starter/__pycache__/
+student_starter/**/__pycache__/
+student_starter/runs/
+student_starter/checkpoints/*.pt
+student_starter/videos/*.mp4
+student_starter/.env
+
+!student_starter/checkpoints/.gitkeep
+!student_starter/videos/.gitkeep

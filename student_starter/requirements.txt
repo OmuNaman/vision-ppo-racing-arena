@@ -1,0 +1,8 @@
+torch==2.6.0
+numpy==1.26.4
+gymnasium==0.29.1
+metadrive-simulator==0.4.3
+tensorboard==2.20.0
+supabase==2.30.0
+python-dotenv==1.2.1
+mediapy==1.2.6
