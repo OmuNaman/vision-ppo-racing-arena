@@ -13,6 +13,14 @@ Upcoming update: a live leaderboard will be added soon so students can submit ch
 ## Setup In 3 Commands
 
 ```powershell
+git clone https://github.com/OmuNaman/vision-ppo-racing-arena.git; cd vision-ppo-racing-arena\student_starter
+py -3.11 -m venv .venv; .\.venv\Scripts\Activate.ps1
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+If you already cloned the repo, start from the project root:
+
+```powershell
 cd student_starter
 py -3.11 -m venv .venv; .\.venv\Scripts\Activate.ps1
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
@@ -85,7 +93,7 @@ Evaluation runs 20 episodes and reports mean return, mean episode length, and ro
 
 ## Submit
 
-Create `student_starter/.env`:
+Create `.env` inside `student_starter`:
 
 ```text
 SUPABASE_URL=your-project-url
