@@ -95,10 +95,10 @@ class RacingEnv(gym.Env):
                 "show_interface": bool(render),
                 "show_logo": False,
                 "show_fps": bool(render),
-                # Hide the ground/shoulders so the road reads like a floating
-                # platform. The physics remains MetaDrive's real road physics.
-                "show_terrain": False,
-                "show_sidewalk": False,
+                # Keep rendered terrain on; otherwise MetaDrive clears the
+                # hidden world to white and the camera sees a blank slab.
+                "show_terrain": True,
+                "show_sidewalk": True,
                 "show_crosswalk": False,
                 "horizon": horizon,
                 "out_of_road_done": True,

@@ -1,6 +1,6 @@
 # Vision-Based PPO Sky-Road Arena
 
-Students train a PPO agent to drive a MetaDrive car from raw 3D RGB camera frames only. The road is a narrow floating-style chicane: terrain and sidewalks are hidden, obstacles and sparse traffic appear on the route, and leaving the road is treated as falling off the platform.
+Students train a PPO agent to drive a MetaDrive car from raw 3D RGB camera frames only. The road is a narrow chicane/sky-bridge-style course: obstacles and sparse traffic appear on the route, and leaving the road is treated as falling off the platform.
 
 ## Setup In 3 Commands
 
