@@ -171,58 +171,23 @@ For a local dry run without upload:
 
 ## Live Leaderboard
 
-This repo includes a static Supabase-powered leaderboard in `leaderboard/index.html`. It shows the best submission per student, ranks by route completion, plays replay videos, and live-updates when new submissions arrive.
-
-Current deployed leaderboard:
+Submissions appear on the official class leaderboard. Students only need to train, submit, and view their score here:
 
 https://leaderboard-ruddy-nine.vercel.app
 
-Instructor setup:
-
-1. Create a new Supabase project.
-2. Open Supabase SQL Editor and run `leaderboard/schema.sql`.
-3. Confirm Storage has a public bucket named `videos`.
-4. Copy your Project URL and publishable key from Supabase Settings -> API.
-5. Put the same values in each student's `student_starter/.env`:
+Use these values in `student_starter/.env` so `submit.py` can upload your evaluated score and replay video:
 
 ```text
 SUPABASE_URL=https://nuykrnrijmviisdaxaha.supabase.co
 SUPABASE_KEY=sb_publishable_VCZ9nUzqj0qq1GYAZtDAEg_gfhQ5ATW
 ```
 
-6. Open `leaderboard/index.html` and replace:
-
-```javascript
-const SUPABASE_URL = "https://nuykrnrijmviisdaxaha.supabase.co";
-const SUPABASE_KEY = "sb_publishable_VCZ9nUzqj0qq1GYAZtDAEg_gfhQ5ATW";
-```
-
-7. Deploy the `leaderboard/` folder as a static site.
-
-With Vercel CLI:
-
-```powershell
-npm i -g vercel
-vercel leaderboard --prod
-```
-
-With GitHub Pages:
-
-- push the repo to GitHub
-- Settings -> Pages
-- deploy from branch
-- set folder to `/leaderboard` if your Pages settings allow it, or copy `leaderboard/index.html` into the selected Pages folder
-
-Important: the publishable key is expected to be public. Row-level security policies in `leaderboard/schema.sql` allow public read/insert for the classroom leaderboard. Never publish the Supabase `service_role` or secret key.
-
 ## Files
 
-- `env.py`: 3D MetaDrive sky-road wrapper with stacked RGB camera observations shaped `(4, 3, 64, 64)`.
+- `env.py`: 3D MetaDrive sky-road wrapper with stacked RGB camera observations shaped `(4, 3, 94, 94)`.
 - `eval_maps.py`: The default leaderboard sky-road map config.
 - `reward_config.py`: Student-editable reward, penalty, maximum-speed, and action-scaling constants.
 - `model.py`: CNN actor-critic with diagonal Normal continuous action policy.
 - `train_ppo.py`: PyTorch PPO with GAE, clipping, entropy bonus, TensorBoard logging, gradient clipping, and checkpointing.
 - `eval_policy.py`: Deterministic checkpoint evaluation.
 - `submit.py`: Evaluation, replay video recording, Supabase upload, and leaderboard summary.
-- `../leaderboard/index.html`: Static live leaderboard dashboard.
-- `../leaderboard/schema.sql`: Supabase table, policy, and storage setup SQL.
