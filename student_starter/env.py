@@ -20,7 +20,7 @@ import reward_config as cfg
 FRAME_STACK = 4
 CAMERA_SIZE = 64
 DEFAULT_MAP_NAME = "sky_chicane"
-DEFAULT_MAP_CONFIG: dict[str, Any] = {"type": "block_sequence", "config": "SCSCS"}
+DEFAULT_MAP_CONFIG: dict[str, Any] = {"type": "block_sequence", "config": "SSCSS"}
 
 
 EVAL_MAPS: dict[str, dict[str, Any]] = {
@@ -72,6 +72,7 @@ class RacingEnv(gym.Env):
         self._last_info: dict[str, Any] = {}
         self._episode_step = 0
         self._stall_steps = 0
+        self._last_completion = 0.0
 
         map_cfg = EVAL_MAPS[DEFAULT_MAP_NAME]
         self._env = MetaDriveEnv(
@@ -152,6 +153,7 @@ class RacingEnv(gym.Env):
         for _ in range(FRAME_STACK):
             self._frames.append(frame.copy())
         self._last_info = self._augment_info(info)
+        self._last_completion = float(self._last_info.get("route_completion", 0.0))
         return self._stacked_obs(), self._last_info
 
     def step(self, action):
@@ -160,14 +162,15 @@ class RacingEnv(gym.Env):
         env_action[0] *= cfg.STEERING_SCALE
         if env_action[1] > 0.0:
             env_action[1] *= cfg.THROTTLE_SCALE
-        raw_obs, default_reward, terminated, truncated, info = self._env.step(env_action)
+        raw_obs, _default_reward, terminated, truncated, info = self._env.step(env_action)
         self._episode_step += 1
         self._frames.append(self._rgb_frame(raw_obs))
         info = self._augment_info(info)
         info["policy_steer"] = float(clipped_action[0])
         info["applied_steer"] = float(env_action[0])
         info["applied_throttle"] = float(env_action[1])
-        reward = self._sky_reward(float(default_reward), info, clipped_action)
+        reward = self._sky_reward(info, clipped_action)
+        self._last_completion = float(info.get("route_completion", self._last_completion))
         if self._is_stalling(info, clipped_action):
             self._stall_steps += 1
         else:
@@ -238,13 +241,20 @@ class RacingEnv(gym.Env):
         width = max(float(agent.navigation.get_current_lane_width()), 1e-6)
         return float(np.clip(1.0 - abs(lateral) / (0.5 * width), 0.0, 1.0))
 
-    def _sky_reward(self, default_reward: float, info: dict[str, Any], action: np.ndarray) -> float:
-        reward = default_reward
+    def _sky_reward(self, info: dict[str, Any], action: np.ndarray) -> float:
         speed = float(info.get("speed_km_h", 0.0))
         center = float(info.get("center_score", 0.0))
         steer = abs(float(action[0]))
         throttle = max(float(action[1]), 0.0)
         brake = max(float(-action[1]), 0.0)
+        completion = float(info.get("route_completion", self._last_completion))
+        progress_delta = completion - self._last_completion
+
+        if progress_delta >= 0.0:
+            reward = cfg.PROGRESS_REWARD_SCALE * progress_delta
+        else:
+            reward = cfg.BACKWARD_PROGRESS_PENALTY_SCALE * progress_delta
+        info["progress_delta"] = float(progress_delta)
 
         off_center = 1.0 - center
         reward += cfg.CENTER_BONUS * center

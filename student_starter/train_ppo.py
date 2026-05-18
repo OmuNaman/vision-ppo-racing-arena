@@ -26,23 +26,25 @@ GAE_LAMBDA = 0.95
 HORIZON = 512
 EPOCHS = 4
 MINIBATCH = 64
-ENTROPY_COEF = 0.01
+ENTROPY_COEF = 0.02
 VALUE_COEF = 0.5
 MAX_GRAD_NORM = 0.5
 SAVE_EVERY = 50_000
+TARGET_KL = 0.03
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train a pixel-only PPO driver in MetaDrive.")
     parser.add_argument("--steps", type=int, default=1_000_000, help="Total environment steps.")
     parser.add_argument("--render", action="store_true", help="Open the Panda3D 3D window while training.")
-    parser.add_argument("--lr", type=float, default=2.5e-4, help="Adam learning rate.")
+    parser.add_argument("--lr", type=float, default=1.0e-4, help="Adam learning rate.")
     parser.add_argument("--seed", type=int, default=0, help="Random seed.")
     parser.add_argument("--device", choices=["auto", "cuda", "cpu"], default="auto", help="Training device.")
     parser.add_argument("--horizon", type=int, default=HORIZON, help="PPO rollout length.")
     parser.add_argument("--epochs", type=int, default=EPOCHS, help="PPO optimization epochs per rollout.")
     parser.add_argument("--minibatch", type=int, default=MINIBATCH, help="PPO minibatch size.")
     parser.add_argument("--save-every", type=int, default=SAVE_EVERY, help="Checkpoint interval in env steps.")
+    parser.add_argument("--target-kl", type=float, default=TARGET_KL, help="Stop PPO epochs early above this KL.")
     parser.add_argument("--checkpoint", type=str, default="checkpoints/policy.pt", help="Checkpoint path.")
     parser.add_argument("--logdir", type=str, default="runs/ppo_pixels", help="TensorBoard log directory.")
     return parser.parse_args()
@@ -176,13 +178,17 @@ def main() -> None:
             last_policy_loss = 0.0
             last_value_loss = 0.0
             last_entropy = 0.0
+            last_approx_kl = 0.0
             indices = np.arange(rollout_len)
             for _epoch in range(args.epochs):
                 np.random.shuffle(indices)
+                stop_update = False
                 for start in range(0, rollout_len, args.minibatch):
                     mb = indices[start : start + args.minibatch]
                     new_logprobs, entropy, values = model.evaluate_actions(b_obs[mb], b_actions[mb])
-                    ratio = (new_logprobs - b_old_logprobs[mb]).exp()
+                    logratio = new_logprobs - b_old_logprobs[mb]
+                    ratio = logratio.exp()
+                    approx_kl = ((ratio - 1.0) - logratio).mean()
                     unclipped = ratio * b_advantages[mb]
                     clipped = torch.clamp(ratio, 1.0 - CLIP_EPS, 1.0 + CLIP_EPS) * b_advantages[mb]
                     policy_loss = -torch.min(unclipped, clipped).mean()
@@ -198,11 +204,19 @@ def main() -> None:
                     last_policy_loss = float(policy_loss.item())
                     last_value_loss = float(value_loss.item())
                     last_entropy = float(entropy_loss.item())
+                    last_approx_kl = float(approx_kl.item())
+
+                    if args.target_kl > 0 and last_approx_kl > args.target_kl:
+                        stop_update = True
+                        break
+                if stop_update:
+                    break
 
             update_idx += 1
             writer.add_scalar("policy_loss", last_policy_loss, global_step)
             writer.add_scalar("value_loss", last_value_loss, global_step)
             writer.add_scalar("entropy", last_entropy, global_step)
+            writer.add_scalar("approx_kl", last_approx_kl, global_step)
             writer.add_scalar("actions/mean_steer", float(action_buf[:, 0].mean()), global_step)
             writer.add_scalar("actions/mean_abs_steer", float(np.abs(action_buf[:, 0]).mean()), global_step)
             writer.add_scalar("actions/mean_throttle", float(action_buf[:, 1].mean()), global_step)
@@ -212,7 +226,7 @@ def main() -> None:
             print(
                 f"update={update_idx:4d} step={global_step:8d} "
                 f"policy_loss={last_policy_loss:8.4f} value_loss={last_value_loss:8.4f} "
-                f"entropy={last_entropy:6.3f} "
+                f"entropy={last_entropy:6.3f} kl={last_approx_kl:6.4f} "
                 f"steer={action_buf[:, 0].mean():6.3f} abs_steer={np.abs(action_buf[:, 0]).mean():6.3f} "
                 f"throttle={action_buf[:, 1].mean():6.3f} "
                 f"brake={np.maximum(-action_buf[:, 1], 0.0).mean():6.3f} "

@@ -15,7 +15,7 @@ ACTION_EPS = 1e-6
 
 
 class CNNActorCritic(nn.Module):
-    def __init__(self, action_dim: int = 2, init_log_std: float = -1.0) -> None:
+    def __init__(self, action_dim: int = 2, init_log_std: float = -1.5) -> None:
         super().__init__()
         self.action_dim = action_dim
         self.encoder = nn.Sequential(
@@ -37,7 +37,7 @@ class CNNActorCritic(nn.Module):
         nn.init.zeros_(self.actor.bias)
         if action_dim >= 2:
             with torch.no_grad():
-                self.actor.bias[1] = 0.8
+                self.actor.bias[1] = 0.45
 
     def forward(self, obs: torch.Tensor) -> tuple[Normal, torch.Tensor]:
         features = self.encode(obs)

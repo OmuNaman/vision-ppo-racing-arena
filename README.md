@@ -1,6 +1,6 @@
 # Vision-Based PPO Sky-Road Arena
 
-Students train a PPO agent to drive a MetaDrive car from raw 3D RGB camera frames only. The road is a narrow chicane/sky-bridge-style course: obstacles and sparse traffic appear on the route, and leaving the road is treated as falling off the platform.
+Students train a PPO agent to drive a MetaDrive car from raw 3D RGB camera frames only. The default road is a simple sky-bridge curriculum course: a straight start followed by chicane-style curves. Leaving the road is treated as falling off the platform.
 
 ## Student Goal
 
@@ -44,10 +44,10 @@ If you have an NVIDIA GPU such as an RTX 4070, install the CUDA PyTorch wheel af
 
 ## Train
 
-Headless training. This is the mode you should use for real runs because rendering is much slower:
+Headless CPU training. This is the simplest reliable command:
 
 ```powershell
-.\.venv\Scripts\python.exe train_ppo.py --steps 1000000
+.\.venv\Scripts\python.exe train_ppo.py --steps 500000 --device cpu --horizon 512 --minibatch 64 --epochs 2 --lr 0.0001 --target-kl 0.03 --checkpoint checkpoints\policy.pt
 ```
 
 RTX 4070 / CUDA command:
@@ -59,7 +59,7 @@ RTX 4070 / CUDA command:
 Watch the 3D Panda3D window while the car learns:
 
 ```powershell
-.\.venv\Scripts\python.exe train_ppo.py --steps 1000000 --render
+.\.venv\Scripts\python.exe train_ppo.py --steps 500000 --device cpu --horizon 512 --minibatch 64 --epochs 2 --lr 0.0001 --target-kl 0.03 --checkpoint checkpoints\policy.pt --render
 ```
 
 Checkpoints are saved to `checkpoints/policy.pt` every 50k environment steps and once at the end. TensorBoard logs go to `runs/ppo_pixels`.
@@ -78,32 +78,52 @@ All student-editable reward and control values live in `reward_config.py`. Chang
 
 Important values include:
 
-- `LANE_WIDTH = 3.4`: road width. Keep it `<= 3.5` for the narrow-road challenge.
+- `LANE_WIDTH = 3.5`: road width. Lower it later if you want to make the challenge harder.
 - `TRAFFIC_DENSITY = 0.0`, `RANDOM_TRAFFIC = False`, `ACCIDENT_PROB = 0.0`: default is deterministic and learnable. Increase later for extra difficulty.
-- `STEERING_SCALE = 0.25` and `THROTTLE_SCALE = 0.85`: internal action scaling before commands reach MetaDrive.
+- `STEERING_SCALE = 0.16` and `THROTTLE_SCALE = 0.75`: internal action scaling before commands reach MetaDrive.
+- `PROGRESS_REWARD_SCALE = 350.0`: main reward for increasing route completion.
+- `BACKWARD_PROGRESS_PENALTY_SCALE = 80.0`: penalty scale if completion goes backward.
 - `MAX_REWARDED_SPEED_KMH = 28.0`: maximum speed rewarded before overspeed penalties begin.
-- `BASE_DRIVING_REWARD = 1.60` and `BASE_SPEED_REWARD = 0.15`: MetaDrive's base progress/speed shaping.
-- `CENTER_BONUS = 0.25` and `OFF_CENTER_PENALTY = 0.20`: lane-centering reward shaping.
-- `SPEED_BONUS = 0.08` and `OVERSPEED_PENALTY = 0.03`: speed shaping.
-- `THROTTLE_BONUS = 0.015`: small reward for asking the car to move.
-- `BRAKE_BASE_PENALTY = 0.25`, `LOW_SPEED_BRAKE_EXTRA_PENALTY = 0.90`, and `IDLE_BRAKE_EXTRA_PENALTY = 0.90`: brake discouragement.
-- `IDLE_STEP_PENALTY = 0.08`, `STALL_AFTER_STEPS = 35`, and `STALL_TERMINAL_REWARD = -80.0`: anti-idle behavior.
-- `FINISH_REWARD = 160.0`, `FALL_OFF_ROAD_REWARD = -80.0`, `HIT_OBSTACLE_REWARD = -60.0`, `HIT_TRAFFIC_REWARD = -60.0`, and `HIT_EDGE_REWARD = -80.0`: terminal outcomes.
+- `BASE_DRIVING_REWARD = 0.0` and `BASE_SPEED_REWARD = 0.0`: MetaDrive base reward is disabled so the signal stays simple.
+- `CENTER_BONUS = 0.04` and `OFF_CENTER_PENALTY = 0.08`: small lane-centering shaping.
+- `SPEED_BONUS = 0.02` and `OVERSPEED_PENALTY = 0.03`: light speed shaping.
+- `THROTTLE_BONUS = 0.005`: tiny reward for asking the car to move.
+- `BRAKE_BASE_PENALTY = 0.05`, `LOW_SPEED_BRAKE_EXTRA_PENALTY = 0.20`, and `IDLE_BRAKE_EXTRA_PENALTY = 0.20`: brake discouragement.
+- `IDLE_STEP_PENALTY = 0.03`, `STALL_AFTER_STEPS = 35`, and `STALL_TERMINAL_REWARD = -20.0`: anti-idle behavior.
+- `FINISH_REWARD = 100.0`, `FALL_OFF_ROAD_REWARD = -20.0`, `HIT_OBSTACLE_REWARD = -20.0`, `HIT_TRAFFIC_REWARD = -20.0`, and `HIT_EDGE_REWARD = -20.0`: terminal outcomes.
 
-The reward uses MetaDrive's forward-driving reward as the base, then adds sky-road shaping:
+The reward is intentionally simple:
 
-- Forward progress and speed are rewarded.
+- Increasing route completion is the main reward.
 - Overspeeding above `MAX_REWARDED_SPEED_KMH` gets a penalty.
 - Staying near the lane center gets a small bonus.
 - Positive throttle gets a small bonus.
 - Braking is penalized, especially at low speed or when already nearly idle.
 - Excessive steering is penalized, especially while fast or near the road edge.
 - Steering and positive throttle commands are scaled down internally so early PPO exploration is less twitchy.
-- Crawling/idling after the first few steps gets a recurring penalty.
+- Crawling/idling after the first few steps gets a small recurring penalty.
 - Sustained low-speed stalling ends the episode with a penalty.
 - Reaching the finish gives `+100`.
-- Falling off the road gives `-60`.
-- Hitting an obstacle or traffic vehicle gives `-35`.
+- Falling off the road gives `-20`.
+- Hitting an obstacle or traffic vehicle gives `-20`.
+
+## Smoke-Tested Numbers
+
+These are not final-performance claims; they are sanity checks that the environment now gives PPO a usable learning signal.
+
+Fixed-action reward sanity check:
+
+- straight throttle: return `126.19`, length `154`, route completion `46.5%`
+- hard left + throttle: return `-16.78`, length `23`, route completion `2.2%`
+- idle: return `-18.85`, length `55`, route completion `1.2%`
+- brake: return `-35.12`, length `55`, route completion `1.1%`
+
+PPO smoke tests on CPU:
+
+- 4,096 headless training steps: deterministic eval over 5 episodes reached `16.8%` mean route completion.
+- 8,192 headless training steps: deterministic eval over 5 episodes reached `40.0%` mean route completion.
+- Rendered eval of the 8,192-step checkpoint reached `40.5%` route completion in 1 episode.
+- Rendered training smoke test ran for 256 steps without Panda3D/image-observation errors.
 
 ## Evaluate
 
