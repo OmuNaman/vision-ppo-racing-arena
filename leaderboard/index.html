@@ -376,9 +376,9 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script>
-    // Instructor: replace these with your Supabase Project URL and anon key.
-    const SUPABASE_URL = "https://YOUR-PROJECT.supabase.co";
-    const SUPABASE_KEY = "YOUR_SUPABASE_ANON_KEY";
+    // Instructor: these are safe publishable Supabase credentials for browser reads.
+    const SUPABASE_URL = "https://nuykrnrijmviisdaxaha.supabase.co";
+    const SUPABASE_KEY = "sb_publishable_VCZ9nUzqj0qq1GYAZtDAEg_gfhQ5ATW";
 
     const configured = !SUPABASE_URL.includes("YOUR-PROJECT") && !SUPABASE_KEY.includes("YOUR_SUPABASE");
     const sb = configured ? supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
@@ -516,7 +516,7 @@
         document.getElementById("table").innerHTML = `<div class="error">${esc(error.message)}</div>`;
         return;
       }
-      submissions = data || [];
+      submissions = (data || []).filter((row) => !String(row.creator_uid || "").startsWith("__"));
       status.textContent = "Live";
       render();
     }

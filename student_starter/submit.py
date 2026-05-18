@@ -226,14 +226,15 @@ def print_leaderboard(sb=None, submission_id: str | None = None) -> None:
     try:
         rows = (
             sb.table("submissions")
-            .select("id,creator_name,tag,route_completion,mean_return,mean_episode_length,created_at")
+            .select("id,creator_name,creator_uid,tag,route_completion,mean_return,mean_episode_length,created_at")
             .order("route_completion", desc=True)
             .order("mean_return", desc=True)
             .order("mean_episode_length", desc=False)
-            .limit(10)
+            .limit(50)
             .execute()
             .data
         )
+        rows = [row for row in rows if not str(row.get("creator_uid", "")).startswith("__")]
     except Exception as exc:
         print(f"(could not fetch leaderboard: {exc})")
         return
