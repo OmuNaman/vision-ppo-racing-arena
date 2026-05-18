@@ -33,6 +33,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--render", action="store_true", help="Open the Panda3D 3D window while training.")
     parser.add_argument("--lr", type=float, default=2.5e-4, help="Adam learning rate.")
     parser.add_argument("--seed", type=int, default=0, help="Random seed.")
+    parser.add_argument("--device", choices=["auto", "cuda", "cpu"], default="auto", help="Training device.")
+    parser.add_argument("--horizon", type=int, default=HORIZON, help="PPO rollout length.")
+    parser.add_argument("--epochs", type=int, default=EPOCHS, help="PPO optimization epochs per rollout.")
+    parser.add_argument("--minibatch", type=int, default=MINIBATCH, help="PPO minibatch size.")
+    parser.add_argument("--save-every", type=int, default=SAVE_EVERY, help="Checkpoint interval in env steps.")
     parser.add_argument("--checkpoint", type=str, default="checkpoints/policy.pt", help="Checkpoint path.")
     parser.add_argument("--logdir", type=str, default="runs/ppo_pixels", help="TensorBoard log directory.")
     return parser.parse_args()
@@ -63,7 +68,15 @@ def main() -> None:
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if args.device == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA was requested with --device cuda, but torch.cuda.is_available() is False.")
+    device_name = "cuda" if (args.device == "auto" and torch.cuda.is_available()) else "cpu"
+    if args.device in {"cuda", "cpu"}:
+        device_name = args.device
+    device = torch.device(device_name)
+    if device.type == "cuda":
+        torch.backends.cudnn.benchmark = True
+    print(f"device={device} cuda_available={torch.cuda.is_available()}")
     env = RacingEnv(render=args.render, seed=args.seed)
     model = CNNActorCritic().to(device)
     optimizer = optim.Adam(model.parameters(), lr=args.lr, eps=1e-5)
@@ -71,7 +84,7 @@ def main() -> None:
 
     checkpoint_path = Path(args.checkpoint)
     global_step = 0
-    next_save_step = SAVE_EVERY
+    next_save_step = args.save_every
     update_idx = 0
     obs, _info = env.reset(seed=args.seed)
     ep_return = 0.0
@@ -80,21 +93,18 @@ def main() -> None:
 
     try:
         while global_step < args.steps:
-            obs_buf = np.zeros((HORIZON, 4, 3, 64, 64), dtype=np.uint8)
-            action_buf = np.zeros((HORIZON, 2), dtype=np.float32)
-            logprob_buf = np.zeros(HORIZON, dtype=np.float32)
-            reward_buf = np.zeros(HORIZON, dtype=np.float32)
-            done_buf = np.zeros(HORIZON, dtype=np.float32)
-            value_buf = np.zeros(HORIZON, dtype=np.float32)
+            obs_buf = np.zeros((args.horizon, 4, 3, 64, 64), dtype=np.uint8)
+            action_buf = np.zeros((args.horizon, 2), dtype=np.float32)
+            logprob_buf = np.zeros(args.horizon, dtype=np.float32)
+            reward_buf = np.zeros(args.horizon, dtype=np.float32)
+            done_buf = np.zeros(args.horizon, dtype=np.float32)
+            value_buf = np.zeros(args.horizon, dtype=np.float32)
 
-            for step in range(HORIZON):
+            for step in range(args.horizon):
                 obs_buf[step] = obs
                 obs_t = torch.as_tensor(obs[None], device=device)
                 with torch.no_grad():
-                    dist, value = model(obs_t)
-                    raw_action = dist.sample()
-                    bounded_action = raw_action.clamp(-1.0, 1.0)
-                    log_prob = dist.log_prob(bounded_action).sum(dim=-1)
+                    bounded_action, log_prob, _entropy, value = model.act(obs_t, deterministic=False)
 
                 action = bounded_action.squeeze(0).cpu().numpy().astype(np.float32)
                 next_obs, reward, terminated, truncated, info = env.step(action)
@@ -155,10 +165,10 @@ def main() -> None:
             last_value_loss = 0.0
             last_entropy = 0.0
             indices = np.arange(rollout_len)
-            for _epoch in range(EPOCHS):
+            for _epoch in range(args.epochs):
                 np.random.shuffle(indices)
-                for start in range(0, rollout_len, MINIBATCH):
-                    mb = indices[start : start + MINIBATCH]
+                for start in range(0, rollout_len, args.minibatch):
+                    mb = indices[start : start + args.minibatch]
                     new_logprobs, entropy, values = model.evaluate_actions(b_obs[mb], b_actions[mb])
                     ratio = (new_logprobs - b_old_logprobs[mb]).exp()
                     unclipped = ratio * b_advantages[mb]
@@ -200,7 +210,7 @@ def main() -> None:
             while global_step >= next_save_step:
                 model.save(checkpoint_path, global_step=global_step, map_name="sky_chicane")
                 print(f"saved checkpoint -> {checkpoint_path}")
-                next_save_step += SAVE_EVERY
+                next_save_step += args.save_every
 
         model.save(checkpoint_path, global_step=global_step, map_name="sky_chicane")
         print(f"final checkpoint -> {checkpoint_path}")

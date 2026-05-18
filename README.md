@@ -37,10 +37,16 @@ If PowerShell shows `(.venv)` but `python -m pip` still points at Python 3.13, u
 
 ## Train
 
-Headless training:
+Headless training. This is the mode you should use for real runs because rendering is much slower:
 
 ```powershell
 .\.venv\Scripts\python.exe train_ppo.py --steps 1000000
+```
+
+RTX 4070 / CUDA command:
+
+```powershell
+.\.venv\Scripts\python.exe train_ppo.py --steps 500000 --device cuda --horizon 1024 --minibatch 256 --epochs 4 --checkpoint checkpoints\policy.pt
 ```
 
 Watch the 3D Panda3D window while the car learns:
@@ -51,21 +57,31 @@ Watch the 3D Panda3D window while the car learns:
 
 Checkpoints are saved to `checkpoints/policy.pt` every 50k environment steps and once at the end. TensorBoard logs go to `runs/ppo_pixels`.
 
+To confirm PyTorch sees your RTX 4070:
+
+```powershell
+.\.venv\Scripts\python.exe -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU only')"
+```
+
+Note: MetaDrive simulation and camera capture are still the bottleneck, so the GPU will speed up PPO/CNN updates more than the environment itself. Headless training is usually the biggest speed win.
+
 ## Reward
 
 All student-editable reward and control values live in `reward_config.py`. Change that file when you want to tune the behavior. After editing it, restart training so the new values are loaded. The score to optimize is route completion, reported during training/evaluation as `completion` or `route_completion`.
 
 Important values include:
 
-- `MAX_REWARDED_SPEED_KMH`: maximum speed rewarded before overspeed penalties begin.
-- `STEERING_SCALE` and `THROTTLE_SCALE`: internal action scaling before commands reach MetaDrive.
-- `BASE_DRIVING_REWARD` and `BASE_SPEED_REWARD`: MetaDrive's base progress/speed shaping.
-- `CENTER_BONUS` and `OFF_CENTER_PENALTY`: lane-centering reward shaping.
-- `SPEED_BONUS` and `OVERSPEED_PENALTY`: speed shaping.
-- `THROTTLE_BONUS`: reward for asking the car to move.
-- `BRAKE_BASE_PENALTY`, `LOW_SPEED_BRAKE_EXTRA_PENALTY`, and `IDLE_BRAKE_EXTRA_PENALTY`: brake discouragement.
-- `IDLE_STEP_PENALTY`, `STALL_AFTER_STEPS`, and `STALL_TERMINAL_REWARD`: anti-idle behavior.
-- `FINISH_REWARD`, `FALL_OFF_ROAD_REWARD`, `HIT_OBSTACLE_REWARD`, `HIT_TRAFFIC_REWARD`, and `HIT_EDGE_REWARD`: terminal outcomes.
+- `LANE_WIDTH = 3.4`: road width. Keep it `<= 3.5` for the narrow-road challenge.
+- `TRAFFIC_DENSITY = 0.0`, `RANDOM_TRAFFIC = False`, `ACCIDENT_PROB = 0.0`: default is deterministic and learnable. Increase later for extra difficulty.
+- `STEERING_SCALE = 0.25` and `THROTTLE_SCALE = 0.85`: internal action scaling before commands reach MetaDrive.
+- `MAX_REWARDED_SPEED_KMH = 28.0`: maximum speed rewarded before overspeed penalties begin.
+- `BASE_DRIVING_REWARD = 1.60` and `BASE_SPEED_REWARD = 0.15`: MetaDrive's base progress/speed shaping.
+- `CENTER_BONUS = 0.25` and `OFF_CENTER_PENALTY = 0.20`: lane-centering reward shaping.
+- `SPEED_BONUS = 0.08` and `OVERSPEED_PENALTY = 0.03`: speed shaping.
+- `THROTTLE_BONUS = 0.015`: small reward for asking the car to move.
+- `BRAKE_BASE_PENALTY = 0.25`, `LOW_SPEED_BRAKE_EXTRA_PENALTY = 0.90`, and `IDLE_BRAKE_EXTRA_PENALTY = 0.90`: brake discouragement.
+- `IDLE_STEP_PENALTY = 0.08`, `STALL_AFTER_STEPS = 35`, and `STALL_TERMINAL_REWARD = -80.0`: anti-idle behavior.
+- `FINISH_REWARD = 160.0`, `FALL_OFF_ROAD_REWARD = -80.0`, `HIT_OBSTACLE_REWARD = -60.0`, `HIT_TRAFFIC_REWARD = -60.0`, and `HIT_EDGE_REWARD = -80.0`: terminal outcomes.
 
 The reward uses MetaDrive's forward-driving reward as the base, then adds sky-road shaping:
 
@@ -93,11 +109,11 @@ Evaluation runs 20 episodes and reports mean return, mean episode length, and ro
 
 ## Submit
 
-Create `.env` inside `student_starter`:
+Create `.env` inside `student_starter`. For this class leaderboard you can copy the provided `.env.example`:
 
 ```text
-SUPABASE_URL=your-project-url
-SUPABASE_KEY=your-service-or-anon-key
+SUPABASE_URL=https://nuykrnrijmviisdaxaha.supabase.co
+SUPABASE_KEY=sb_publishable_VCZ9nUzqj0qq1GYAZtDAEg_gfhQ5ATW
 ```
 
 Then submit:
@@ -124,24 +140,28 @@ For a local dry run without upload:
 
 This repo includes a static Supabase-powered leaderboard in `leaderboard/index.html`. It shows the best submission per student, ranks by route completion, plays replay videos, and live-updates when new submissions arrive.
 
+Current deployed leaderboard:
+
+https://leaderboard-ruddy-nine.vercel.app
+
 Instructor setup:
 
 1. Create a new Supabase project.
 2. Open Supabase SQL Editor and run `leaderboard/schema.sql`.
 3. Confirm Storage has a public bucket named `videos`.
-4. Copy your Project URL and anon key from Supabase Settings -> API.
+4. Copy your Project URL and publishable key from Supabase Settings -> API.
 5. Put the same values in each student's `student_starter/.env`:
 
 ```text
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_KEY=your-anon-key
+SUPABASE_URL=https://nuykrnrijmviisdaxaha.supabase.co
+SUPABASE_KEY=sb_publishable_VCZ9nUzqj0qq1GYAZtDAEg_gfhQ5ATW
 ```
 
 6. Open `leaderboard/index.html` and replace:
 
 ```javascript
-const SUPABASE_URL = "https://YOUR-PROJECT.supabase.co";
-const SUPABASE_KEY = "YOUR_SUPABASE_ANON_KEY";
+const SUPABASE_URL = "https://nuykrnrijmviisdaxaha.supabase.co";
+const SUPABASE_KEY = "sb_publishable_VCZ9nUzqj0qq1GYAZtDAEg_gfhQ5ATW";
 ```
 
 7. Deploy the `leaderboard/` folder as a static site.
@@ -160,7 +180,7 @@ With GitHub Pages:
 - deploy from branch
 - set folder to `/leaderboard` if your Pages settings allow it, or copy `leaderboard/index.html` into the selected Pages folder
 
-Important: the anon key is expected to be public. Row-level security policies in `leaderboard/schema.sql` allow public read/insert for the classroom leaderboard.
+Important: the publishable key is expected to be public. Row-level security policies in `leaderboard/schema.sql` allow public read/insert for the classroom leaderboard. Never publish the Supabase `service_role` or secret key.
 
 ## Files
 

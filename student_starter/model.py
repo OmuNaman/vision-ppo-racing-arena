@@ -9,6 +9,10 @@ import torch
 from torch import nn
 from torch.distributions import Normal
 
+LOG_STD_MIN = -2.5
+LOG_STD_MAX = 0.0
+ACTION_EPS = 1e-6
+
 
 class CNNActorCritic(nn.Module):
     def __init__(self, action_dim: int = 2, init_log_std: float = -1.0) -> None:
@@ -38,7 +42,7 @@ class CNNActorCritic(nn.Module):
     def forward(self, obs: torch.Tensor) -> tuple[Normal, torch.Tensor]:
         features = self.encode(obs)
         mean = torch.tanh(self.actor(features))
-        std = self.log_std.exp().expand_as(mean)
+        std = self.log_std.clamp(LOG_STD_MIN, LOG_STD_MAX).exp().expand_as(mean)
         value = self.critic(features).squeeze(-1)
         return Normal(mean, std), value
 
@@ -54,16 +58,28 @@ class CNNActorCritic(nn.Module):
     @torch.no_grad()
     def act(self, obs: torch.Tensor, deterministic: bool = False):
         dist, value = self.forward(obs)
-        action = dist.mean if deterministic else dist.rsample()
-        log_prob = dist.log_prob(action).sum(dim=-1)
+        if deterministic:
+            raw_action = dist.mean
+            action = raw_action.clamp(-1.0, 1.0)
+            log_prob = dist.log_prob(raw_action).sum(dim=-1)
+        else:
+            raw_action = dist.rsample()
+            action = torch.tanh(raw_action)
+            log_prob = self._squashed_log_prob(dist, raw_action, action)
         entropy = dist.entropy().sum(dim=-1)
-        return action.clamp(-1.0, 1.0), log_prob, entropy, value
+        return action, log_prob, entropy, value
 
     def evaluate_actions(self, obs: torch.Tensor, actions: torch.Tensor):
         dist, values = self.forward(obs)
-        log_probs = dist.log_prob(actions).sum(dim=-1)
+        clipped = actions.clamp(-1.0 + ACTION_EPS, 1.0 - ACTION_EPS)
+        raw_actions = torch.atanh(clipped)
+        log_probs = self._squashed_log_prob(dist, raw_actions, clipped)
         entropy = dist.entropy().sum(dim=-1)
         return log_probs, entropy, values
+
+    def _squashed_log_prob(self, dist: Normal, raw_actions: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
+        correction = torch.log(1.0 - actions.pow(2) + ACTION_EPS)
+        return (dist.log_prob(raw_actions) - correction).sum(dim=-1)
 
     def save(self, path: str | Path, **metadata: Any) -> None:
         path = Path(path)
