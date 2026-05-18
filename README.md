@@ -35,6 +35,13 @@ If PowerShell shows `(.venv)` but `python -m pip` still points at Python 3.13, u
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
+If you have an NVIDIA GPU such as an RTX 4070, install the CUDA PyTorch wheel after installing `requirements.txt`:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install --upgrade --force-reinstall torch==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+.\.venv\Scripts\python.exe check_cuda.py
+```
+
 ## Train
 
 Headless training. This is the mode you should use for real runs because rendering is much slower:
@@ -60,7 +67,7 @@ Checkpoints are saved to `checkpoints/policy.pt` every 50k environment steps and
 To confirm PyTorch sees your RTX 4070:
 
 ```powershell
-.\.venv\Scripts\python.exe -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU only')"
+.\.venv\Scripts\python.exe check_cuda.py
 ```
 
 Note: MetaDrive simulation and camera capture are still the bottleneck, so the GPU will speed up PPO/CNN updates more than the environment itself. Headless training is usually the biggest speed win.
@@ -99,6 +106,8 @@ The reward uses MetaDrive's forward-driving reward as the base, then adds sky-ro
 - Hitting an obstacle or traffic vehicle gives `-35`.
 
 ## Evaluate
+
+Evaluate only after `checkpoints/policy.pt` exists. If you see `FileNotFoundError: checkpoints\policy.pt`, train first.
 
 ```powershell
 .\.venv\Scripts\python.exe eval_policy.py --checkpoint checkpoints/policy.pt

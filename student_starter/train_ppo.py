@@ -15,6 +15,11 @@ from env import RacingEnv
 from model import CNNActorCritic
 
 
+CUDA_TORCH_INSTALL = (
+    r".\.venv\Scripts\python.exe -m pip install --upgrade --force-reinstall "
+    r"torch==2.6.0 --index-url https://download.pytorch.org/whl/cu124"
+)
+
 CLIP_EPS = 0.2
 GAMMA = 0.99
 GAE_LAMBDA = 0.95
@@ -69,7 +74,14 @@ def main() -> None:
     np.random.seed(args.seed)
 
     if args.device == "cuda" and not torch.cuda.is_available():
-        raise RuntimeError("CUDA was requested with --device cuda, but torch.cuda.is_available() is False.")
+        raise RuntimeError(
+            "CUDA was requested with --device cuda, but PyTorch cannot see CUDA.\n"
+            "You probably have a CPU-only PyTorch wheel in this venv.\n\n"
+            "From the student_starter folder, run:\n"
+            f"  {CUDA_TORCH_INSTALL}\n\n"
+            "Then verify with:\n"
+            r"  .\.venv\Scripts\python.exe check_cuda.py"
+        )
     device_name = "cuda" if (args.device == "auto" and torch.cuda.is_available()) else "cpu"
     if args.device in {"cuda", "cpu"}:
         device_name = args.device

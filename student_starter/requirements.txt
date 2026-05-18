@@ -1,4 +1,6 @@
 torch==2.6.0
+# RTX/NVIDIA users: after installing this file, run the CUDA wheel command in
+# README.md or `python check_cuda.py` if torch.cuda.is_available() is False.
 numpy==1.26.4
 gymnasium==0.29.1
 metadrive-simulator==0.4.3
