@@ -22,6 +22,12 @@ SUBMIT_MAPS = list(EVAL_MAPS.keys())
 DEFAULT_MAX_STEPS = 1000
 
 
+def sanitize_video_subprocess_env() -> None:
+    """Keep media encoders from inheriting invalid Python env values on Windows."""
+    if os.environ.get("PYTHONUTF8") not in (None, "", "0", "1"):
+        os.environ["PYTHONUTF8"] = "1"
+
+
 def load_dotenv() -> None:
     env_path = Path(__file__).parent / ".env"
     if not env_path.exists():
@@ -187,6 +193,7 @@ def record_video(
 
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
+    sanitize_video_subprocess_env()
     mediapy.write_video(str(out), frames, fps=30)
     print(f"recorded {mode} video -> {out} ({len(frames)} frames)")
     return str(out)
