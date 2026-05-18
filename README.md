@@ -1,10 +1,10 @@
 # Vision-Based PPO Sky-Road Arena
 
-Students train a PPO agent to drive a MetaDrive car from raw 3D RGB camera frames only. The default road is a simple sky-bridge curriculum course: a straight start followed by chicane-style curves. Leaving the road is treated as falling off the platform.
+Students train a PPO agent to drive a MetaDrive car from raw 3D RGB camera frames only. The policy receives four stacked `94x94` RGB camera frames. The default road is a simple sky-bridge curriculum course: a long straight start, then a gentler curve section. Leaving the road is treated as falling off the platform.
 
 ## Student Goal
 
-Your goal is to train the pixel-only PPO driver to maximize route completion on the default sky-road track. The main lever you are expected to experiment with is the reward design in `reward_config.py`: tune the speed reward, center bonus, brake/idle penalties, crash/fall penalties, and maximum rewarded speed, then retrain and compare route completion.
+Your goal is to train the pixel-only PPO driver to maximize route completion on the default sky-road track. The main lever you are expected to experiment with is the reward design in `reward_config.py`: tune the progress reward, heading alignment reward, curve-speed reward, center bonus, brake/idle penalties, crash/fall penalties, and maximum rewarded speed, then retrain and compare route completion.
 
 Do not add state vectors, LiDAR, privileged observations, or hand-coded driving rules. The policy must still learn from RGB camera frames only.
 
@@ -78,16 +78,19 @@ All student-editable reward and control values live in `reward_config.py`. Chang
 
 Important values include:
 
-- `LANE_WIDTH = 3.5`: road width. Lower it later if you want to make the challenge harder.
+- `LANE_WIDTH = 4.2`: road width. Lower it later if you want to make the challenge harder.
 - `TRAFFIC_DENSITY = 0.0`, `RANDOM_TRAFFIC = False`, `ACCIDENT_PROB = 0.0`: default is deterministic and learnable. Increase later for extra difficulty.
-- `STEERING_SCALE = 0.16` and `THROTTLE_SCALE = 0.75`: internal action scaling before commands reach MetaDrive.
+- `STEERING_SCALE = 0.22` and `THROTTLE_SCALE = 0.75`: internal action scaling before commands reach MetaDrive.
 - `PROGRESS_REWARD_SCALE = 350.0`: main reward for increasing route completion.
 - `BACKWARD_PROGRESS_PENALTY_SCALE = 80.0`: penalty scale if completion goes backward.
 - `MAX_REWARDED_SPEED_KMH = 28.0`: maximum speed rewarded before overspeed penalties begin.
 - `BASE_DRIVING_REWARD = 0.0` and `BASE_SPEED_REWARD = 0.0`: MetaDrive base reward is disabled so the signal stays simple.
 - `CENTER_BONUS = 0.04` and `OFF_CENTER_PENALTY = 0.08`: small lane-centering shaping.
+- `HEADING_ALIGNMENT_BONUS = 0.16` and `HEADING_ERROR_PENALTY = 0.12`: reward-only lane-tangent guidance so the car learns to face the road before it falls.
+- `CURVE_LOOKAHEAD_METERS = 18.0`, `CURVE_CENTER_BONUS = 0.08`, `CURVE_SPEED_LIMIT_KMH = 20.0`, and `CURVE_OVERSPEED_PENALTY = 0.08`: curve-aware shaping.
 - `SPEED_BONUS = 0.02` and `OVERSPEED_PENALTY = 0.03`: light speed shaping.
 - `THROTTLE_BONUS = 0.005`: tiny reward for asking the car to move.
+- `STEERING_BASE_PENALTY = 0.006`, `STEERING_SPEED_PENALTY = 0.010`, and `CURVE_STEERING_RELIEF = 0.85`: steering is only lightly discouraged, and even less on curves.
 - `BRAKE_BASE_PENALTY = 0.05`, `LOW_SPEED_BRAKE_EXTRA_PENALTY = 0.20`, and `IDLE_BRAKE_EXTRA_PENALTY = 0.20`: brake discouragement.
 - `IDLE_STEP_PENALTY = 0.03`, `STALL_AFTER_STEPS = 35`, and `STALL_TERMINAL_REWARD = -20.0`: anti-idle behavior.
 - `FINISH_REWARD = 100.0`, `FALL_OFF_ROAD_REWARD = -20.0`, `HIT_OBSTACLE_REWARD = -20.0`, `HIT_TRAFFIC_REWARD = -20.0`, and `HIT_EDGE_REWARD = -20.0`: terminal outcomes.
@@ -95,11 +98,14 @@ Important values include:
 The reward is intentionally simple:
 
 - Increasing route completion is the main reward.
+- Aligning the vehicle heading with the current lane tangent gets a reward.
+- Curves are detected with a short lane lookahead; on curves, center-keeping matters more and steering penalties are softened.
 - Overspeeding above `MAX_REWARDED_SPEED_KMH` gets a penalty.
+- Overspeeding through curves gets an extra penalty.
 - Staying near the lane center gets a small bonus.
 - Positive throttle gets a small bonus.
 - Braking is penalized, especially at low speed or when already nearly idle.
-- Excessive steering is penalized, especially while fast or near the road edge.
+- Excessive steering is lightly penalized, especially while fast or near the road edge.
 - Steering and positive throttle commands are scaled down internally so early PPO exploration is less twitchy.
 - Crawling/idling after the first few steps gets a small recurring penalty.
 - Sustained low-speed stalling ends the episode with a penalty.
@@ -111,19 +117,17 @@ The reward is intentionally simple:
 
 These are not final-performance claims; they are sanity checks that the environment now gives PPO a usable learning signal.
 
-Fixed-action reward sanity check:
+Current fixed-action reward sanity check:
 
-- straight throttle: return `126.19`, length `154`, route completion `46.5%`
-- hard left + throttle: return `-16.78`, length `23`, route completion `2.2%`
-- idle: return `-18.85`, length `55`, route completion `1.2%`
-- brake: return `-35.12`, length `55`, route completion `1.1%`
+- straight throttle: return `242.30`, length `199`, route completion `72.8%`
+- idle: return `-10.21`, length `55`, route completion `1.4%`
 
-PPO smoke tests on CPU:
+PPO smoke tests on CPU after the `94x94` vision and curve-reward update:
 
-- 4,096 headless training steps: deterministic eval over 5 episodes reached `16.8%` mean route completion.
-- 8,192 headless training steps: deterministic eval over 5 episodes reached `40.0%` mean route completion.
-- Rendered eval of the 8,192-step checkpoint reached `40.5%` route completion in 1 episode.
-- Rendered training smoke test ran for 256 steps without Panda3D/image-observation errors.
+- Environment reset/model-forward check passed with observation shape `(4, 3, 94, 94)`.
+- Fixed-action straight throttle now passes the old curve wall and reaches `72.8%` before falling.
+- 2,048 headless training steps completed and saved `checkpoints/vision_curve_smoke.pt`.
+- The 2,048-step deterministic smoke checkpoint reached `9.5%` mean route completion over 3 episodes. This is only a wiring test, not a performance target; train much longer for a real checkpoint.
 
 ## Evaluate
 

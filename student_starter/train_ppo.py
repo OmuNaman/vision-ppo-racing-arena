@@ -107,7 +107,7 @@ def main() -> None:
 
     try:
         while global_step < args.steps:
-            obs_buf = np.zeros((args.horizon, 4, 3, 64, 64), dtype=np.uint8)
+            obs_buf = np.zeros((args.horizon, *env.observation_space.shape), dtype=np.uint8)
             action_buf = np.zeros((args.horizon, 2), dtype=np.float32)
             logprob_buf = np.zeros(args.horizon, dtype=np.float32)
             reward_buf = np.zeros(args.horizon, dtype=np.float32)

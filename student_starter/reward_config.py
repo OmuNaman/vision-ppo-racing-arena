@@ -7,10 +7,9 @@ the low-level control limits inside the environment.
 
 # ----------------------------- Action shaping -----------------------------
 
-# PPO outputs steering in [-1, 1]. MetaDrive receives this scaled value. Keep
-# this conservative for early learning; random camera policies otherwise spin
-# off the sky road before seeing useful reward.
-STEERING_SCALE = 0.16
+# PPO outputs steering in [-1, 1]. MetaDrive receives this scaled value. This
+# now leaves enough authority to take the first curve while staying tame early.
+STEERING_SCALE = 0.22
 
 # PPO outputs throttle/brake in [-1, 1]. Positive values are throttle and are
 # multiplied by this before MetaDrive sees them. Negative values remain brake.
@@ -19,8 +18,9 @@ THROTTLE_SCALE = 0.75
 
 # ---------------------------- Course difficulty ---------------------------
 
-# Wider is easier, narrower is harder. Keep <= 3.5 for the sky-road challenge.
-LANE_WIDTH = 3.5
+# Wider is easier, narrower is harder. The default is intentionally learnable
+# for vision PPO students; reduce it later when the baseline reliably finishes.
+LANE_WIDTH = 4.2
 
 # Default to a deterministic, learnable road. Increase these only after the
 # agent can drive the base track reliably.
@@ -60,6 +60,20 @@ CENTER_BONUS = 0.04
 # Quadratic penalty for being away from lane center.
 OFF_CENTER_PENALTY = 0.08
 
+# Privileged reward-only road geometry signals. The policy still sees RGB
+# pixels only. These terms teach "point along the road" before a crash happens.
+HEADING_ALIGNMENT_BONUS = 0.16
+HEADING_ERROR_PENALTY = 0.12
+HEADING_ERROR_REFERENCE_RADIANS = 0.70
+
+# Look ahead along the current lane to detect when a curve is coming. Curves get
+# extra center reward, softer steering penalties, and a lower comfortable speed.
+CURVE_LOOKAHEAD_METERS = 18.0
+CURVE_REFERENCE_RADIANS = 0.45
+CURVE_CENTER_BONUS = 0.08
+CURVE_SPEED_LIMIT_KMH = 20.0
+CURVE_OVERSPEED_PENALTY = 0.08
+
 # Small dense bonus for moving, capped at MAX_REWARDED_SPEED_KMH.
 SPEED_BONUS = 0.02
 
@@ -72,12 +86,14 @@ OVERSPEED_PENALTY_STEP_KMH = 5.0
 THROTTLE_BONUS = 0.005
 THROTTLE_BONUS_WHEN_OVERSPEED = 0.25
 
-# Steering penalties. The final steering penalty is:
-# base + speed-sensitive + edge-sensitive.
-STEERING_BASE_PENALTY = 0.025
-STEERING_SPEED_PENALTY = 0.035
+# Steering penalties. Keep these small: the car must be allowed to turn. The
+# environment reduces them further when a curve is detected ahead.
+STEERING_BASE_PENALTY = 0.006
+STEERING_SPEED_PENALTY = 0.010
 STEERING_SPEED_REFERENCE_KMH = 25.0
-STEERING_EDGE_PENALTY = 0.08
+STEERING_EDGE_PENALTY = 0.035
+CURVE_STEERING_RELIEF = 0.85
+MIN_STEERING_PENALTY_MULTIPLIER = 0.15
 
 # Brake penalties. Brake is useful sometimes, but unnecessary braking was a
 # common failure mode, so low-speed braking is punished harder.

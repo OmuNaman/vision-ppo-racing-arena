@@ -1,6 +1,6 @@
 """3D MetaDrive sky-road arena with stacked RGB camera observations.
 
-The student policy sees only pixels: four consecutive 64x64 RGB frames from
+The student policy sees only pixels: four consecutive 94x94 RGB frames from
 MetaDrive's vehicle-mounted camera. The world is configured like a narrow
 "sky road": terrain and sidewalks are hidden, the lane is tight, and leaving
 the drivable surface ends the episode with a large fall-style penalty.
@@ -18,9 +18,9 @@ import reward_config as cfg
 
 
 FRAME_STACK = 4
-CAMERA_SIZE = 64
+CAMERA_SIZE = 94
 DEFAULT_MAP_NAME = "sky_chicane"
-DEFAULT_MAP_CONFIG: dict[str, Any] = {"type": "block_sequence", "config": "SSCSS"}
+DEFAULT_MAP_CONFIG: dict[str, Any] = {"type": "block_sequence", "config": "SSSCS"}
 
 
 EVAL_MAPS: dict[str, dict[str, Any]] = {
@@ -80,12 +80,18 @@ class RacingEnv(gym.Env):
                 "num_scenarios": 100_000,
                 "start_seed": 0,
                 "use_render": bool(render),
+                # RGB observations need an offscreen renderer, but we do not
+                # use pedestrians/traffic lights. Avoid preloading those GLTF
+                # assets on reset; it is slow and can fail on some Windows
+                # Panda3D installs.
+                "preload_models": False,
                 "image_observation": True,
                 "image_on_cuda": False,
                 "norm_pixel": False,
                 "stack_size": 1,
                 "sensors": {"rgb_camera": (RGBCamera, CAMERA_SIZE, CAMERA_SIZE)},
                 "vehicle_config": {
+                    "vehicle_model": "default",
                     "image_source": "rgb_camera",
                     "show_navi_mark": False,
                     "show_dest_mark": False,
@@ -226,11 +232,16 @@ class RacingEnv(gym.Env):
             clean["speed_km_h"] = float(max(getattr(agent, "speed_km_h", 0.0), 0.0))
             clean["route_completion"] = float(getattr(agent.navigation, "route_completion", 0.0))
             clean["center_score"] = self._center_score(agent)
+            heading_info = self._heading_info(agent)
+            clean.update(heading_info)
             clean["on_lane"] = bool(getattr(agent, "on_lane", False))
         else:
             clean.setdefault("speed_km_h", 0.0)
             clean.setdefault("route_completion", 0.0)
             clean.setdefault("center_score", 0.0)
+            clean.setdefault("heading_alignment", 0.0)
+            clean.setdefault("heading_error_abs", 0.0)
+            clean.setdefault("curve_strength", 0.0)
             clean.setdefault("on_lane", False)
         return clean
 
@@ -241,9 +252,49 @@ class RacingEnv(gym.Env):
         width = max(float(agent.navigation.get_current_lane_width()), 1e-6)
         return float(np.clip(1.0 - abs(lateral) / (0.5 * width), 0.0, 1.0))
 
+    def _heading_info(self, agent) -> dict[str, float]:
+        if not getattr(agent, "on_lane", False) or getattr(agent, "lane", None) is None:
+            return {
+                "heading_alignment": 0.0,
+                "heading_error": 0.0,
+                "heading_error_abs": 0.0,
+                "curve_strength": 0.0,
+            }
+        try:
+            longitudinal, _lateral = agent.lane.local_coordinates(agent.position)
+            lane_heading = float(agent.lane.heading_theta_at(longitudinal))
+            lookahead_heading = float(
+                agent.lane.heading_theta_at(longitudinal + cfg.CURVE_LOOKAHEAD_METERS)
+            )
+            car_heading = float(getattr(agent, "heading_theta", lane_heading))
+        except Exception:
+            return {
+                "heading_alignment": 0.0,
+                "heading_error": 0.0,
+                "heading_error_abs": 0.0,
+                "curve_strength": 0.0,
+            }
+
+        heading_error = self._wrap_angle(car_heading - lane_heading)
+        curve_delta = self._wrap_angle(lookahead_heading - lane_heading)
+        curve_strength = min(abs(curve_delta) / cfg.CURVE_REFERENCE_RADIANS, 1.0)
+        return {
+            "heading_alignment": float(np.cos(heading_error)),
+            "heading_error": float(heading_error),
+            "heading_error_abs": float(abs(heading_error)),
+            "curve_strength": float(curve_strength),
+        }
+
+    @staticmethod
+    def _wrap_angle(angle: float) -> float:
+        return float((angle + np.pi) % (2.0 * np.pi) - np.pi)
+
     def _sky_reward(self, info: dict[str, Any], action: np.ndarray) -> float:
         speed = float(info.get("speed_km_h", 0.0))
         center = float(info.get("center_score", 0.0))
+        heading_alignment = float(info.get("heading_alignment", 0.0))
+        heading_error_abs = float(info.get("heading_error_abs", 0.0))
+        curve_strength = float(info.get("curve_strength", 0.0))
         steer = abs(float(action[0]))
         throttle = max(float(action[1]), 0.0)
         brake = max(float(-action[1]), 0.0)
@@ -259,20 +310,31 @@ class RacingEnv(gym.Env):
         off_center = 1.0 - center
         reward += cfg.CENTER_BONUS * center
         reward -= cfg.OFF_CENTER_PENALTY * (off_center**2)
+        reward += cfg.HEADING_ALIGNMENT_BONUS * heading_alignment
+        reward -= cfg.HEADING_ERROR_PENALTY * min(heading_error_abs / cfg.HEADING_ERROR_REFERENCE_RADIANS, 1.0)
+        reward += cfg.CURVE_CENTER_BONUS * curve_strength * center
         reward += cfg.SPEED_BONUS * min(speed / cfg.MAX_REWARDED_SPEED_KMH, 1.0)
         if speed > cfg.MAX_REWARDED_SPEED_KMH:
             reward -= cfg.OVERSPEED_PENALTY * (
                 (speed - cfg.MAX_REWARDED_SPEED_KMH) / cfg.OVERSPEED_PENALTY_STEP_KMH
             )
+        if curve_strength > 0.0 and speed > cfg.CURVE_SPEED_LIMIT_KMH:
+            reward -= (
+                cfg.CURVE_OVERSPEED_PENALTY
+                * curve_strength
+                * ((speed - cfg.CURVE_SPEED_LIMIT_KMH) / cfg.OVERSPEED_PENALTY_STEP_KMH)
+            )
         reward += cfg.THROTTLE_BONUS * throttle * (
             1.0 if speed < cfg.MAX_REWARDED_SPEED_KMH else cfg.THROTTLE_BONUS_WHEN_OVERSPEED
         )
 
+        steering_relief = 1.0 - cfg.CURVE_STEERING_RELIEF * curve_strength
+        steering_relief = float(np.clip(steering_relief, cfg.MIN_STEERING_PENALTY_MULTIPLIER, 1.0))
         steering_penalty = (
             cfg.STEERING_BASE_PENALTY * steer
             + cfg.STEERING_SPEED_PENALTY * steer * min(speed / cfg.STEERING_SPEED_REFERENCE_KMH, 1.0)
             + cfg.STEERING_EDGE_PENALTY * steer * off_center
-        )
+        ) * steering_relief
         reward -= steering_penalty
         info["steering_penalty"] = float(steering_penalty)
 

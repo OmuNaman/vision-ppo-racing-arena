@@ -2,6 +2,8 @@ student_starter/.venv/
 student_starter/__pycache__/
 student_starter/**/__pycache__/
 student_starter/runs/
+runs/
+Panda3D-1.10/
 student_starter/checkpoints/*.pt
 student_starter/videos/*.mp4
 student_starter/debug_frames/
