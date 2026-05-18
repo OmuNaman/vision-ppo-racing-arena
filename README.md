@@ -8,7 +8,7 @@ Your goal is to train the pixel-only PPO driver to maximize route completion on 
 
 Do not add state vectors, LiDAR, privileged observations, or hand-coded driving rules. The policy must still learn from RGB camera frames only.
 
-Upcoming update: a live leaderboard will be added soon so students can submit checkpoints and compare completion scores.
+The repo includes a live leaderboard dashboard so students can submit checkpoints and compare completion scores.
 
 ## Setup In 3 Commands
 
@@ -106,13 +106,61 @@ Then submit:
 .\.venv\Scripts\python.exe submit.py --checkpoint checkpoints/policy.pt --tag first-run --name "Your Name" --uid your-id
 ```
 
-`submit.py` evaluates on the default sky-road map, records a top-down MP4 for the leaderboard, uploads the result to the Supabase `submissions` table, then prints a leaderboard summary.
+`submit.py` evaluates on the default sky-road map, records an MP4 replay for the leaderboard, uploads the result to the Supabase `submissions` table, then prints a leaderboard summary.
+
+The default replay is a top-down MetaDrive video because it is reliable in headless mode. To record the actual RGB camera frames seen by PPO instead:
+
+```powershell
+.\.venv\Scripts\python.exe submit.py --checkpoint checkpoints/policy.pt --tag camera-view --video-mode camera
+```
 
 For a local dry run without upload:
 
 ```powershell
 .\.venv\Scripts\python.exe submit.py --checkpoint checkpoints/policy.pt --tag dry-run --no-upload
 ```
+
+## Live Leaderboard
+
+This repo includes a static Supabase-powered leaderboard in `leaderboard/index.html`. It shows the best submission per student, ranks by route completion, plays replay videos, and live-updates when new submissions arrive.
+
+Instructor setup:
+
+1. Create a new Supabase project.
+2. Open Supabase SQL Editor and run `leaderboard/schema.sql`.
+3. Confirm Storage has a public bucket named `videos`.
+4. Copy your Project URL and anon key from Supabase Settings -> API.
+5. Put the same values in each student's `student_starter/.env`:
+
+```text
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_KEY=your-anon-key
+```
+
+6. Open `leaderboard/index.html` and replace:
+
+```javascript
+const SUPABASE_URL = "https://YOUR-PROJECT.supabase.co";
+const SUPABASE_KEY = "YOUR_SUPABASE_ANON_KEY";
+```
+
+7. Deploy the `leaderboard/` folder as a static site.
+
+With Vercel CLI:
+
+```powershell
+npm i -g vercel
+vercel leaderboard --prod
+```
+
+With GitHub Pages:
+
+- push the repo to GitHub
+- Settings -> Pages
+- deploy from branch
+- set folder to `/leaderboard` if your Pages settings allow it, or copy `leaderboard/index.html` into the selected Pages folder
+
+Important: the anon key is expected to be public. Row-level security policies in `leaderboard/schema.sql` allow public read/insert for the classroom leaderboard.
 
 ## Files
 
@@ -122,4 +170,6 @@ For a local dry run without upload:
 - `model.py`: CNN actor-critic with diagonal Normal continuous action policy.
 - `train_ppo.py`: PyTorch PPO with GAE, clipping, entropy bonus, TensorBoard logging, gradient clipping, and checkpointing.
 - `eval_policy.py`: Deterministic checkpoint evaluation.
-- `submit.py`: Evaluation, top-down video recording, Supabase upload, and leaderboard summary.
+- `submit.py`: Evaluation, replay video recording, Supabase upload, and leaderboard summary.
+- `../leaderboard/index.html`: Static live leaderboard dashboard.
+- `../leaderboard/schema.sql`: Supabase table, policy, and storage setup SQL.

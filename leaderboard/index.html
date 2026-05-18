@@ -1,0 +1,559 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vision PPO Racing Arena Leaderboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f7f8fb;
+      --panel: #ffffff;
+      --ink: #121826;
+      --muted: #697386;
+      --line: #dce2ea;
+      --accent: #2563eb;
+      --accent-2: #f97316;
+      --good: #0f9f6e;
+      --shadow: 0 14px 40px rgba(18, 24, 38, 0.08);
+      --radius: 10px;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+    }
+
+    header {
+      background: #0f172a;
+      color: white;
+      padding: 30px 24px 34px;
+      border-bottom: 4px solid var(--accent-2);
+    }
+
+    .wrap { max-width: 1180px; margin: 0 auto; }
+    .topline {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(2rem, 4vw, 3.4rem);
+      letter-spacing: -0.04em;
+      line-height: 1.02;
+    }
+
+    .subtitle {
+      color: #cbd5e1;
+      max-width: 760px;
+      margin: 14px 0 0;
+      font-size: 1rem;
+      line-height: 1.7;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 999px;
+      color: #dbeafe;
+      font-size: 0.85rem;
+      white-space: nowrap;
+    }
+
+    main { padding: 28px 24px 52px; }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin: -50px auto 28px;
+      max-width: 1180px;
+    }
+
+    .stat {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 18px;
+      box-shadow: var(--shadow);
+    }
+
+    .stat .label {
+      color: var(--muted);
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-weight: 700;
+    }
+
+    .stat .value {
+      margin-top: 8px;
+      font-size: 1.8rem;
+      font-weight: 800;
+      letter-spacing: -0.04em;
+    }
+
+    section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      margin-bottom: 22px;
+      overflow: hidden;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    h2 { margin: 0; font-size: 1.05rem; letter-spacing: -0.01em; }
+    .section-note { color: var(--muted); font-size: 0.9rem; }
+
+    .showcase {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      padding: 18px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fff;
+      cursor: pointer;
+      transition: transform 0.16s ease, border-color 0.16s ease;
+    }
+
+    .card:hover { transform: translateY(-2px); border-color: var(--accent); }
+
+    .video-wrap {
+      position: relative;
+      background: #111827;
+      aspect-ratio: 1 / 1;
+    }
+
+    .video-wrap video {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: cover;
+    }
+
+    .rank {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      width: 42px;
+      height: 42px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      color: white;
+      background: rgba(15, 23, 42, 0.82);
+      font-weight: 800;
+    }
+
+    .rank.gold { background: #c88719; }
+    .rank.silver { background: #64748b; }
+    .rank.bronze { background: #a16207; }
+
+    .card-body { padding: 14px; }
+    .name { font-weight: 800; font-size: 1.05rem; }
+    .tag { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.86rem; margin-top: 3px; }
+
+    .metric-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .metric {
+      border-top: 1px solid var(--line);
+      padding-top: 10px;
+    }
+
+    .metric span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-weight: 700;
+    }
+
+    .metric strong {
+      display: block;
+      margin-top: 3px;
+      font-size: 1.03rem;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.92rem;
+    }
+
+    th, td {
+      padding: 13px 16px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: middle;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      background: #f8fafc;
+    }
+
+    tr:last-child td { border-bottom: none; }
+    .completion { color: var(--good); font-weight: 800; }
+    .play {
+      border: 1px solid var(--line);
+      background: white;
+      border-radius: 7px;
+      padding: 7px 10px;
+      cursor: pointer;
+      color: var(--accent);
+      font-weight: 700;
+    }
+    .play:hover { border-color: var(--accent); }
+
+    .empty, .error {
+      color: var(--muted);
+      padding: 30px 20px;
+      text-align: center;
+    }
+
+    .error {
+      color: #b42318;
+      background: #fff4f2;
+      border: 1px solid #ffd6cc;
+      border-radius: 8px;
+      margin: 18px;
+    }
+
+    .modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(2, 6, 23, 0.78);
+      z-index: 20;
+      padding: 28px;
+    }
+
+    .modal.active {
+      display: grid;
+      place-items: center;
+    }
+
+    .modal-box {
+      max-width: 900px;
+      width: min(900px, 100%);
+      background: #0f172a;
+      color: white;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 24px 80px rgba(0,0,0,0.36);
+    }
+
+    .modal-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 16px;
+      border-bottom: 1px solid rgba(255,255,255,0.12);
+    }
+
+    .close {
+      border: 0;
+      background: transparent;
+      color: white;
+      font-size: 1.4rem;
+      cursor: pointer;
+    }
+
+    .modal video {
+      display: block;
+      width: 100%;
+      max-height: 75vh;
+      background: black;
+    }
+
+    @media (max-width: 820px) {
+      .topline { flex-direction: column; align-items: flex-start; }
+      .stats, .showcase { grid-template-columns: 1fr; }
+      table { font-size: 0.82rem; }
+      th, td { padding: 10px 9px; }
+      .hide-sm { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <div class="topline">
+        <div class="pill">RGB-only PPO · MetaDrive · Sky Road</div>
+        <div class="pill" id="status-pill">Connecting to leaderboard...</div>
+      </div>
+      <h1>Vision PPO Racing Arena</h1>
+      <p class="subtitle">
+        Students tune reward design and train pixel-only PPO policies. Ranking is based on route completion,
+        then mean return, then shorter episode length.
+      </p>
+    </div>
+  </header>
+
+  <main>
+    <div class="stats">
+      <div class="stat">
+        <div class="label">Best Completion</div>
+        <div class="value" id="best-completion">--</div>
+      </div>
+      <div class="stat">
+        <div class="label">Submissions</div>
+        <div class="value" id="submission-count">--</div>
+      </div>
+      <div class="stat">
+        <div class="label">Competitors</div>
+        <div class="value" id="competitor-count">--</div>
+      </div>
+      <div class="stat">
+        <div class="label">Latest</div>
+        <div class="value" id="latest-time">--</div>
+      </div>
+    </div>
+
+    <div class="wrap">
+      <section>
+        <div class="section-head">
+          <h2>Top Replays</h2>
+          <div class="section-note">Best submission per student</div>
+        </div>
+        <div id="showcase" class="showcase"></div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h2>Leaderboard</h2>
+          <div class="section-note">Live updates when new submissions arrive</div>
+        </div>
+        <div id="table"></div>
+      </section>
+    </div>
+  </main>
+
+  <div class="modal" id="modal" onclick="if (event.target === this) closeModal()">
+    <div class="modal-box">
+      <div class="modal-head">
+        <strong id="modal-title">Replay</strong>
+        <button class="close" onclick="closeModal()">x</button>
+      </div>
+      <video id="modal-video" controls></video>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script>
+    // Instructor: replace these with your Supabase Project URL and anon key.
+    const SUPABASE_URL = "https://YOUR-PROJECT.supabase.co";
+    const SUPABASE_KEY = "YOUR_SUPABASE_ANON_KEY";
+
+    const configured = !SUPABASE_URL.includes("YOUR-PROJECT") && !SUPABASE_KEY.includes("YOUR_SUPABASE");
+    const sb = configured ? supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+    let submissions = [];
+
+    const pct = (x) => `${((Number(x) || 0) * 100).toFixed(1)}%`;
+    const num = (x, digits = 1) => Number(x || 0).toFixed(digits);
+    const enc = (value) => encodeURIComponent(value == null ? "" : String(value)).replace(/'/g, "%27");
+    const esc = (value) => {
+      const div = document.createElement("div");
+      div.textContent = value == null ? "" : String(value);
+      return div.innerHTML;
+    };
+
+    function bestPerStudent(rows) {
+      const best = new Map();
+      for (const row of rows) {
+        const uid = row.creator_uid || `${row.creator_name}-${row.tag}`;
+        const previous = best.get(uid);
+        if (!previous || compareRows(row, previous) < 0) best.set(uid, row);
+      }
+      return [...best.values()].sort(compareRows);
+    }
+
+    function compareRows(a, b) {
+      const completion = (Number(b.route_completion) || 0) - (Number(a.route_completion) || 0);
+      if (Math.abs(completion) > 1e-9) return completion;
+      const ret = (Number(b.mean_return) || 0) - (Number(a.mean_return) || 0);
+      if (Math.abs(ret) > 1e-9) return ret;
+      return (Number(a.mean_episode_length) || Infinity) - (Number(b.mean_episode_length) || Infinity);
+    }
+
+    function rankClass(rank) {
+      if (rank === 1) return "rank gold";
+      if (rank === 2) return "rank silver";
+      if (rank === 3) return "rank bronze";
+      return "rank";
+    }
+
+    function renderStats(best, all) {
+      document.getElementById("best-completion").textContent = best.length ? pct(best[0].route_completion) : "--";
+      document.getElementById("submission-count").textContent = all.length;
+      document.getElementById("competitor-count").textContent = best.length;
+      document.getElementById("latest-time").textContent = all.length
+        ? new Date(all[0].created_at).toLocaleDateString()
+        : "--";
+    }
+
+    function renderShowcase(best) {
+      const el = document.getElementById("showcase");
+      const rows = best.filter((row) => row.video_url).slice(0, 6);
+      if (!rows.length) {
+        el.innerHTML = '<div class="empty">No replay videos yet. Submit with video enabled to appear here.</div>';
+        return;
+      }
+      el.innerHTML = rows.map((row, idx) => `
+        <article class="card" onclick="openEncoded('${enc(`${row.creator_name} - ${row.tag}`)}', '${enc(row.video_url)}')">
+          <div class="video-wrap">
+            <video src="${esc(row.video_url)}" muted loop playsinline autoplay></video>
+            <div class="${rankClass(idx + 1)}">#${idx + 1}</div>
+          </div>
+          <div class="card-body">
+            <div class="name">${esc(row.creator_name)}</div>
+            <div class="tag">${esc(row.tag)}</div>
+            <div class="metric-row">
+              <div class="metric"><span>Route</span><strong>${pct(row.route_completion)}</strong></div>
+              <div class="metric"><span>Return</span><strong>${num(row.mean_return)}</strong></div>
+              <div class="metric"><span>Length</span><strong>${num(row.mean_episode_length, 0)}</strong></div>
+            </div>
+          </div>
+        </article>
+      `).join("");
+    }
+
+    function renderTable(best) {
+      const el = document.getElementById("table");
+      if (!best.length) {
+        el.innerHTML = '<div class="empty">No submissions yet. Be the first policy on the board.</div>';
+        return;
+      }
+      el.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Name</th>
+              <th>Tag</th>
+              <th>Route</th>
+              <th>Return</th>
+              <th class="hide-sm">Length</th>
+              <th class="hide-sm">Submitted</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${best.map((row, idx) => `
+              <tr>
+                <td><strong>${idx + 1}</strong></td>
+                <td><strong>${esc(row.creator_name)}</strong></td>
+                <td><code>${esc(row.tag)}</code></td>
+                <td class="completion">${pct(row.route_completion)}</td>
+                <td>${num(row.mean_return)}</td>
+                <td class="hide-sm">${num(row.mean_episode_length, 0)}</td>
+                <td class="hide-sm">${new Date(row.created_at).toLocaleString()}</td>
+                <td>${row.video_url ? `<button class="play" onclick="openEncoded('${enc(`${row.creator_name} - ${row.tag}`)}', '${enc(row.video_url)}')">Play</button>` : ""}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      `;
+    }
+
+    function render() {
+      const best = bestPerStudent(submissions);
+      renderStats(best, submissions);
+      renderShowcase(best);
+      renderTable(best);
+    }
+
+    async function loadSubmissions() {
+      const status = document.getElementById("status-pill");
+      if (!configured) {
+        status.textContent = "Configure Supabase in leaderboard/index.html";
+        document.getElementById("showcase").innerHTML =
+          '<div class="error">Set SUPABASE_URL and SUPABASE_KEY in leaderboard/index.html before deploying.</div>';
+        document.getElementById("table").innerHTML = "";
+        return;
+      }
+      const { data, error } = await sb
+        .from("submissions")
+        .select("*")
+        .order("created_at", { ascending: false });
+      if (error) {
+        status.textContent = "Supabase error";
+        document.getElementById("table").innerHTML = `<div class="error">${esc(error.message)}</div>`;
+        return;
+      }
+      submissions = data || [];
+      status.textContent = "Live";
+      render();
+    }
+
+    function openModal(title, url) {
+      event.stopPropagation();
+      document.getElementById("modal-title").textContent = title;
+      const video = document.getElementById("modal-video");
+      video.src = url;
+      document.getElementById("modal").classList.add("active");
+      video.play();
+    }
+
+    function openEncoded(title, url) {
+      openModal(decodeURIComponent(title), decodeURIComponent(url));
+    }
+
+    function closeModal() {
+      const video = document.getElementById("modal-video");
+      video.pause();
+      video.src = "";
+      document.getElementById("modal").classList.remove("active");
+    }
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeModal();
+    });
+
+    loadSubmissions().then(() => {
+      if (!configured) return;
+      sb.channel("leaderboard-submissions")
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "submissions" }, (payload) => {
+          submissions.unshift(payload.new);
+          render();
+        })
+        .subscribe();
+    });
+  </script>
+</body>
+</html>
